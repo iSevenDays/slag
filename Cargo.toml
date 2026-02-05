@@ -1,6 +1,6 @@
 [package]
 name = "slag"
-version = "1.3.2"
+version = "1.3.3"
 edition = "2021"
 description = "Smelt ideas, skim the bugs, forge the product."
 license = "MIT"

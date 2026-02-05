@@ -56,6 +56,7 @@ pub fn prepare_flux(ingot: &Ingot, slag: Option<&str>) -> String {
         flux.push_str(&format!(
             "!!! CRACKED - PREVIOUS ATTEMPT FAILED !!!\n{slag_msg}\n!!! ANALYZE AND FIX !!!\n"
         ));
+        flux.push_str("End with exactly: CMD: <shell command to verify>\n\n");
     } else {
         flux.push_str("=== INSTRUCTIONS ===\n");
         flux.push_str("1. Forge this ingot completely\n");
