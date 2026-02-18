@@ -2,6 +2,7 @@ pub mod claude;
 pub mod mock;
 
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 
 use crate::error::SlagError;
@@ -14,6 +15,16 @@ pub trait Smith: Send + Sync {
         &self,
         prompt: &str,
     ) -> Pin<Box<dyn Future<Output = Result<String, SlagError>> + Send + '_>>;
+
+    /// Send a prompt while executing in a specific directory.
+    /// Default implementation falls back to regular invocation.
+    fn invoke_in_dir(
+        &self,
+        prompt: &str,
+        _dir: &Path,
+    ) -> Pin<Box<dyn Future<Output = Result<String, SlagError>> + Send + '_>> {
+        self.invoke(prompt)
+    }
 }
 
 /// Check if response text contains unresolved questions

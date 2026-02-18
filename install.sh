@@ -81,7 +81,13 @@ case ":$PATH:" in
             *)    PROFILE="$HOME/.profile" ;;
         esac
 
-        EXPORT_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+        if [ "$SHELL_NAME" = "fish" ]; then
+            EXPORT_LINE="set -gx PATH \"$INSTALL_DIR\" \$PATH"
+            ACTIVATE_CMD="source $PROFILE; and slag --version"
+        else
+            EXPORT_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+            ACTIVATE_CMD="source $PROFILE && slag --version"
+        fi
 
         # Check if already in profile
         if [ -f "$PROFILE" ] && grep -qF "$INSTALL_DIR" "$PROFILE" 2>/dev/null; then
@@ -94,7 +100,7 @@ case ":$PATH:" in
             echo "  Added to $PROFILE"
             echo ""
             echo "  Activate now with:"
-            echo "    source $PROFILE && slag --version"
+            echo "    $ACTIVATE_CMD"
         fi
         ;;
 esac

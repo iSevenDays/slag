@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use tokio::io::AsyncWriteExt;
@@ -36,7 +37,7 @@ impl ClaudeSmith {
         }
     }
 
-    async fn invoke_impl(&self, prompt: &str) -> Result<String, SlagError> {
+    async fn invoke_impl(&self, prompt: &str, cwd: Option<&Path>) -> Result<String, SlagError> {
         let parts: Vec<&str> = shell_words(&self.command);
         if parts.is_empty() {
             return Err(SlagError::SmithFailed("empty smith command".into()));
@@ -45,11 +46,16 @@ impl ClaudeSmith {
         let program = parts[0];
         let args = &parts[1..];
 
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(dir) = cwd {
+            command.current_dir(dir);
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| SlagError::SmithFailed(format!("failed to spawn {program}: {e}")))?;
 
@@ -84,7 +90,17 @@ impl Smith for ClaudeSmith {
         prompt: &str,
     ) -> Pin<Box<dyn Future<Output = Result<String, SlagError>> + Send + '_>> {
         let prompt = prompt.to_string();
-        Box::pin(async move { self.invoke_impl(&prompt).await })
+        Box::pin(async move { self.invoke_impl(&prompt, None).await })
+    }
+
+    fn invoke_in_dir(
+        &self,
+        prompt: &str,
+        dir: &Path,
+    ) -> Pin<Box<dyn Future<Output = Result<String, SlagError>> + Send + '_>> {
+        let prompt = prompt.to_string();
+        let dir = PathBuf::from(dir);
+        Box::pin(async move { self.invoke_impl(&prompt, Some(&dir)).await })
     }
 }
 

@@ -19,6 +19,7 @@ pub struct ForgeResult {
     pub id: String,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
+    pub heat_used: u8,
 }
 
 /// Phase 3: Forge loop — parallel anvils then sequential
@@ -94,11 +95,17 @@ pub async fn run(
                 match result {
                     Ok((id, Ok(forge_result))) => {
                         crucible.set_status(&id, Status::Forged);
+                        if let Some(ingot) = crucible.get_mut(&id) {
+                            ingot.heat = forge_result.heat_used;
+                        }
                         crucible.save()?;
                         forged_results.push(forge_result);
                     }
-                    Ok((id, Err(_))) => {
+                    Ok((id, Err(SlagError::IngotCracked(_, heat_used)))) => {
                         // Try resmelt
+                        if let Some(ingot) = crucible.get_mut(&id) {
+                            ingot.heat = heat_used;
+                        }
                         if let Some(ingot) = crucible.get(&id).cloned() {
                             let smith = ClaudeSmith::base(config);
                             if resmelt::resmelt_ingot(&mut crucible, &ingot, &smith)
@@ -111,6 +118,14 @@ pub async fn run(
                                 crucible.save()?;
                             }
                         }
+                    }
+                    Ok((id, Err(e))) => {
+                        eprintln!(
+                            "  \x1b[31m✗\x1b[0m [{}] forge infrastructure error: {e}",
+                            id
+                        );
+                        crucible.set_status(&id, Status::Cracked);
+                        crucible.save()?;
                     }
                     Err(e) => {
                         eprintln!("  \x1b[31m✗\x1b[0m anvil panicked: {e}");
@@ -142,11 +157,17 @@ pub async fn run(
             Ok(forge_result) => {
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
                 crucible.set_status(&ingot.id, Status::Forged);
+                if let Some(ingot) = crucible.get_mut(&ingot.id) {
+                    ingot.heat = forge_result.heat_used;
+                }
                 crucible.save()?;
                 forged_results.push(forge_result);
             }
-            Err(_) => {
+            Err(SlagError::IngotCracked(_, heat_used)) => {
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
+                if let Some(ingot) = crucible.get_mut(&ingot.id) {
+                    ingot.heat = heat_used;
+                }
                 let base_smith = ClaudeSmith::base(config);
                 if resmelt::resmelt_ingot(&mut crucible, &ingot, &base_smith)
                     .await
@@ -159,6 +180,7 @@ pub async fn run(
                     crucible.save()?;
                 }
             }
+            Err(e) => return Err(e),
         }
 
         let crucible = Crucible::load(Path::new(CRUCIBLE))?;
@@ -219,13 +241,6 @@ async fn strike_ingot(
     );
 
     for heat in 1..=ingot.max {
-        // Update heat in crucible file
-        {
-            let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
-            crucible.increment_heat(&ingot.id);
-            crucible.save()?;
-        }
-
         let hc = match heat {
             1..=2 => "\x1b[31m",
             3 => "\x1b[38;5;208m",
@@ -332,6 +347,7 @@ async fn strike_ingot(
                     None
                 },
                 worktree_path,
+                heat_used: heat,
             });
         } else {
             slag = Some(format!("CMD failed (exit 1): {output}"));
@@ -360,7 +376,9 @@ async fn invoke_smith_in_worktree(
         All file operations should be relative to this directory.\n\n\
         {prompt}"
     );
-    smith.invoke(&enhanced_prompt).await
+    smith
+        .invoke_in_dir(&enhanced_prompt, Path::new(worktree_path))
+        .await
 }
 
 /// Run a shell command in a specific directory

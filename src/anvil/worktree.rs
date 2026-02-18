@@ -63,3 +63,13 @@ pub async fn cleanup_without_merge(ingot_id: &str) {
         .output()
         .await;
 }
+
+/// Remove a worktree and delete its branch (used when branch is rejected).
+pub async fn cleanup_and_delete_branch(ingot_id: &str) {
+    let branch = format!("forge/{ingot_id}");
+    cleanup_without_merge(ingot_id).await;
+    let _ = tokio::process::Command::new("git")
+        .args(["branch", "-D", &branch])
+        .output()
+        .await;
+}

@@ -1,6 +1,10 @@
-use crate::config::PipelineConfig;
+use std::path::Path;
+
+use crate::config::{PipelineConfig, CRUCIBLE};
+use crate::crucible::Crucible;
 use crate::error::SlagError;
 use crate::flux;
+use crate::sexp::Status;
 use crate::smith::Smith;
 use crate::tui;
 
@@ -81,6 +85,7 @@ pub async fn run(
             if !config.review_all {
                 println!("    \x1b[31m✗\x1b[0m skipping AI review (CI failed)");
                 rejected_count += 1;
+                mark_ingot_cracked(&forge_result.id)?;
                 cleanup_branch(&forge_result.id, config.keep_branches).await;
                 continue;
             }
@@ -94,6 +99,7 @@ pub async fn run(
                 approved_count += 1;
             } else {
                 rejected_count += 1;
+                mark_ingot_cracked(&forge_result.id)?;
                 cleanup_branch(&forge_result.id, config.keep_branches).await;
             }
             continue;
@@ -120,12 +126,14 @@ pub async fn run(
                     println!("    \x1b[31m✗\x1b[0m rejected");
                     println!("    \x1b[90m{}\x1b[0m", tui::truncate(&result.comments, 60));
                     rejected_count += 1;
+                    mark_ingot_cracked(&forge_result.id)?;
                     cleanup_branch(&forge_result.id, config.keep_branches).await;
                 }
             }
             Err(e) => {
                 eprintln!("    \x1b[31m✗\x1b[0m review error: {e}");
                 rejected_count += 1;
+                mark_ingot_cracked(&forge_result.id)?;
                 cleanup_branch(&forge_result.id, config.keep_branches).await;
             }
         }
@@ -221,7 +229,7 @@ async fn run_ci_checks(branch: &str, worktree_path: Option<&str>) -> CiResult {
 /// Get the diff for a branch compared to main
 async fn get_branch_diff(branch: &str) -> String {
     let output = tokio::process::Command::new("git")
-        .args(["diff", "main...HEAD", "--stat"])
+        .args(["diff", &format!("main...{branch}"), "--stat"])
         .output()
         .await;
 
@@ -310,7 +318,14 @@ async fn cleanup_branch(ingot_id: &str, keep: bool) {
         return;
     }
     use crate::anvil::worktree;
-    worktree::cleanup_without_merge(ingot_id).await;
+    worktree::cleanup_and_delete_branch(ingot_id).await;
+}
+
+fn mark_ingot_cracked(id: &str) -> Result<(), SlagError> {
+    let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
+    crucible.set_status(id, Status::Cracked);
+    crucible.save()?;
+    Ok(())
 }
 
 /// Print CI failure details

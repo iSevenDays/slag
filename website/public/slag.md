@@ -112,8 +112,8 @@ Every ingot carries a `:proof` field containing a shell command. Exit code 0 mea
 ### Why Self-Iteration?
 When a surveyor or founder output contains questions, slag detects them and feeds the output back with instructions to resolve autonomously. Up to 3 rounds. This prevents the forge from stalling on ambiguity. The AI is instructed to make expert decisions rather than ask for clarification.
 
-### Why Re-Smelt?
-When an ingot cracks after exhausting all heats, re-smelting analyzes the failure logs, blueprint, and git history to diagnose the root cause. It can rewrite the ingot with corrected work/proof, split it into 2-4 focused sub-ingots, or declare it impossible. Each ingot gets one re-smelt attempt — learning from failure instead of brute-forcing retries.
+### Why Re-Smelt + Reconsider?
+When an ingot cracks after exhausting all heats, re-smelting analyzes failure logs, blueprint, and git history to diagnose the root cause. It can rewrite the work/proof, split into sub-ingots, or declare impossible. If a re-smelted ingot cracks again, a reconsider pass rethinks the approach (not just tweaks), so each ingot gets two recovery stages before permanently cracking.
 
 ### Why Metallurgical Metaphor?
 Unambiguous vocabulary that maps naturally to the pipeline. Ore (raw input) is surveyed, cast into ingots, heated in a forge, and either becomes forged steel or cracked waste. Every term has exactly one meaning. The temperature gradient (cold → hot → pure) maps to progress from unstarted to complete.
@@ -155,6 +155,7 @@ Yes. slag invokes `claude` via CLI. Install it from [docs.anthropic.com](https:/
 | `:skill` | web \| api \| cli \| default | Selects smith tools/plugins |
 | `:heat` | 0-N | Current retry attempt |
 | `:max` | 5-8+ | Max retries before cracking |
+| `:smelt` | 0-2+ | Re-smelt/reconsider count (0 = never, 1 = re-smelted, 2 = reconsidered) |
 | `:proof` | shell command | Acceptance test (exit 0 = pass) |
 | `:work` | string | Task description for the smith |
 

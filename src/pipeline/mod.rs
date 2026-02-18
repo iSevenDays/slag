@@ -69,11 +69,28 @@ pub async fn run(
             Err(SlagError::ForgeFailed(_)) => Vec::new(),
             Err(e) => return Err(e),
         };
+        let forged_branches = if pipeline_config.worktree {
+            collect_forged_worktree_results(crucible_path).await?
+        } else {
+            forged_branches
+        };
 
         // Phase 3.5: Review (if worktree mode enabled)
         if pipeline_config.should_review() && !forged_branches.is_empty() {
             let smith = ClaudeSmith::base(smith_config);
             review::run(&smith, pipeline_config, &forged_branches).await?;
+        } else if pipeline_config.worktree
+            && pipeline_config.skip_review
+            && !forged_branches.is_empty()
+        {
+            tui::header("MERGE · skip-review mode");
+            for result in &forged_branches {
+                println!(
+                    "  \x1b[38;5;220m◐\x1b[0m merging [\x1b[1;37m{}\x1b[0m]",
+                    result.id
+                );
+                crate::anvil::worktree::merge_and_cleanup(&result.id).await?;
+            }
         }
 
         // Check if we're done (all forged, none cracked)
@@ -119,6 +136,39 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+async fn collect_forged_worktree_results(
+    crucible_path: &std::path::Path,
+) -> Result<Vec<forge::ForgeResult>, SlagError> {
+    let crucible = Crucible::load(crucible_path)?;
+    let existing_branches = review::list_forge_branches().await;
+    let mut results = Vec::new();
+
+    for branch in existing_branches {
+        let Some(id) = branch.strip_prefix("forge/") else {
+            continue;
+        };
+        let Some(ingot) = crucible.get(id) else {
+            continue;
+        };
+        if ingot.status != crate::sexp::Status::Forged {
+            continue;
+        }
+        let worktree_path = format!("../slag-anvil-{id}");
+        results.push(forge::ForgeResult {
+            id: id.to_string(),
+            branch: Some(branch),
+            worktree_path: if std::path::Path::new(&worktree_path).exists() {
+                Some(worktree_path)
+            } else {
+                None
+            },
+            heat_used: ingot.heat,
+        });
+    }
+
+    Ok(results)
 }
 
 /// Initialize project structure (fire the furnace)

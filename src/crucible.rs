@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::sexp::parser::{parse_crucible, parse_ingot};
 use crate::sexp::writer::write_ingot;
@@ -75,7 +76,7 @@ impl Crucible {
         let content = self.build_content();
 
         // Write to temp file in same directory (ensures same filesystem for atomic rename)
-        let temp_path = self.path.with_extension("tmp");
+        let temp_path = unique_temp_path(&self.path);
         std::fs::write(&temp_path, &content)?;
 
         // Atomic rename
@@ -87,7 +88,7 @@ impl Crucible {
         let content = self.build_content();
 
         // Write to temp file in same directory
-        let temp_path = self.path.with_extension("tmp");
+        let temp_path = unique_temp_path(&self.path);
         tokio::fs::write(&temp_path, &content).await?;
 
         // Atomic rename
@@ -193,6 +194,15 @@ impl CrucibleCounts {
 /// Parse ingot lines from raw founder output
 pub fn parse_ingot_lines(raw: &str) -> Vec<Ingot> {
     parse_crucible(raw)
+}
+
+fn unique_temp_path(path: &Path) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    path.with_extension(format!("tmp.{pid}.{nanos}"))
 }
 
 #[cfg(test)]

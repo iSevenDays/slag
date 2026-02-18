@@ -177,9 +177,9 @@ When `--worktree` is enabled, each ingot is forged in an isolated git worktree b
 
 1. **CI Checks** -- runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --all` on each branch
 2. **Master Review** -- AI agent reviews the diff, code quality, and integration safety
-3. **Merge Decision** -- approved branches merge to main; rejected branches are flagged
+3. **Merge Decision** -- approved branches merge to main; rejected branches are marked cracked for retry/recovery
 
-Use `--ci-only` to skip AI review and auto-merge on CI pass. Use `--keep-branches` to preserve branches for debugging.
+Use `--ci-only` to skip AI review and auto-merge on CI pass. Use `--skip-review` for legacy behavior (merge forged worktree branches without master review). Use `--keep-branches` to preserve branches for debugging.
 
 ### Phase 3.6: Analysis & Retry
 
@@ -214,7 +214,7 @@ Final report. Counts forged vs cracked, writes results to `PROGRESS.md`.
 | `:skill` | default / web / ... | Tool configuration for the smith |
 | `:heat` | 0-N | Current retry attempt |
 | `:max` | 5-8+ | Max retries before cracking |
-| `:smelt` | 0-1 | Re-smelt count (0 = never, 1 = re-smelted once) |
+| `:smelt` | 0-2+ | Re-smelt/reconsider count (0 = never, 1 = re-smelted, 2 = reconsidered) |
 | `:proof` | shell command | Acceptance test (exit 0 = pass) |
 | `:work` | string | Task description for the AI |
 
