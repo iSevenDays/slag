@@ -91,6 +91,8 @@ Deep analysis with plan mode. Reads PRD.md (ore), produces BLUEPRINT.md with arc
 
 ### 2. FOUNDER
 Casts S-expression ingots from the blueprint. Each ingot has an ID, complexity grade, skill tag, proof command, and work description. Outputs PLAN.md as the crucible.
+If the model returns wrappers/prose instead of ingot lines, slag automatically re-casts founder output with stricter constraints.
+Multiline/wrapped `(ingot ...)` expressions are now parsed from mixed output to avoid false zero-ingot failures.
 
 ### 3. FORGE
 Strikes each ingot via Claude. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.

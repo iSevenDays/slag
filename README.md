@@ -171,6 +171,9 @@ Reads the blueprint and casts S-expression ingots into `PLAN.md`:
        :proof "test -f package.json" :work "Initialize project with package.json")
 ```
 
+Founder now includes a format-recovery pass: if the model returns wrappers/prose instead of ingot lines, slag automatically re-casts with stricter output constraints.
+The parser also extracts multiline/wrapped `(ingot ...)` expressions from mixed output, so benign formatting noise does not dead-stop the pipeline.
+
 ### Phase 3: Forge
 
 The main loop. For each ingot:

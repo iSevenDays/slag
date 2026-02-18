@@ -137,6 +137,9 @@ Reads the blueprint and casts S-expression ingots into `PLAN.md`:
        :proof "test -f package.json" :work "Initialize project with package.json")
 ```
 
+Founder includes format recovery: if the model emits wrappers/prose instead of ingot lines, slag re-casts with stricter constraints.
+Parser extraction also handles multiline/wrapped `(ingot ...)` expressions from mixed output.
+
 **Input:** BLUEPRINT.md
 **Output:** PLAN.md (crucible with ingots)
 
