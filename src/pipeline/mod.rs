@@ -37,7 +37,8 @@ pub async fn run(
         !content.contains("(ingot ")
     };
     if needs_founder {
-        let smith = ClaudeSmith::plan(smith_config);
+        // Founder is pure text synthesis; base mode is less likely to emit planning wrappers.
+        let smith = ClaudeSmith::base(smith_config);
         founder::run(&smith, pipeline_config.verbose).await?;
     }
 

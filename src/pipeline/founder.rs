@@ -25,9 +25,33 @@ pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
     log_to_file("FOUNDER_RAW", &raw);
 
     // Self-iterate if questions
-    let raw = smith::self_iterate(smith, raw, MAX_ITERATE).await?;
+    let mut raw = smith::self_iterate(smith, raw, MAX_ITERATE).await?;
+    let mut ingots = crucible::parse_ingot_lines(&raw);
 
-    let ingots = crucible::parse_ingot_lines(&raw);
+    // Recovery path: some models return prose/XML despite strict format instructions.
+    for attempt in 1..=MAX_ITERATE {
+        if !ingots.is_empty() {
+            break;
+        }
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            &format!("Founder format retry {attempt}/{MAX_ITERATE}"),
+        );
+        let repair_prompt = flux::founder_recast_prompt(&ore, &blueprint, &raw);
+        log_to_file(&format!("FOUNDER_RECAST_PROMPT_{attempt}"), &repair_prompt);
+        let retry_spinner = tui::spinner("re-casting...");
+        let retry_raw = smith.invoke(&repair_prompt).await.map_err(|e| {
+            retry_spinner.finish_and_clear();
+            SlagError::FounderFailed(e.to_string())
+        })?;
+        retry_spinner.finish_and_clear();
+        log_to_file(&format!("FOUNDER_RECAST_RAW_{attempt}"), &retry_raw);
+
+        raw = smith::self_iterate(smith, retry_raw, MAX_ITERATE).await?;
+        ingots = crucible::parse_ingot_lines(&raw);
+    }
+
     if ingots.is_empty() {
         return Err(SlagError::NoIngots);
     }

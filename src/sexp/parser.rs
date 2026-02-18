@@ -4,6 +4,7 @@ use super::{Ingot, Skill, Status};
 const KNOWN_FIELDS: &[&str] = &[
     "id", "status", "solo", "grade", "skill", "heat", "max", "smelt", "proof", "work",
 ];
+const INGOT_PREFIX: &str = "(ingot";
 
 /// Parse a single s-expression line into an Ingot.
 ///
@@ -13,12 +14,15 @@ const KNOWN_FIELDS: &[&str] = &[
 /// - Unknown fields are preserved in `extra`
 pub fn parse_ingot(line: &str) -> Option<Ingot> {
     let line = line.trim();
-    if !line.starts_with("(ingot ") {
+    if !is_ingot_prefix(line) {
         return None;
     }
 
-    // Strip outer parens
-    let inner = &line[7..line.len() - if line.ends_with(')') { 1 } else { 0 }];
+    // Strip "(ingot" and optional outer ')'.
+    let mut inner = line[INGOT_PREFIX.len()..].trim_start();
+    if let Some(stripped) = inner.strip_suffix(')') {
+        inner = stripped;
+    }
 
     let fields = parse_fields(inner);
 
@@ -59,6 +63,16 @@ pub fn parse_ingot(line: &str) -> Option<Ingot> {
         work,
         extra,
     })
+}
+
+fn is_ingot_prefix(s: &str) -> bool {
+    if !s.starts_with(INGOT_PREFIX) {
+        return false;
+    }
+    match s[INGOT_PREFIX.len()..].chars().next() {
+        None => true,
+        Some(c) => c.is_whitespace() || c == ':' || c == ')',
+    }
 }
 
 /// Parse `:key value` pairs from the inner content of an s-expression.
@@ -132,17 +146,70 @@ fn parse_fields(s: &str) -> Vec<(String, String)> {
 
 /// Parse all ingot lines from a crucible file's content.
 pub fn parse_crucible(content: &str) -> Vec<Ingot> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("(ingot ") {
-                parse_ingot(trimmed)
-            } else {
-                None
-            }
-        })
+    extract_ingot_expressions(content)
+        .into_iter()
+        .filter_map(parse_ingot)
         .collect()
+}
+
+fn extract_ingot_expressions(content: &str) -> Vec<&str> {
+    let bytes = content.as_bytes();
+    let mut expressions = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'(' {
+            let rest = &content[i..];
+            if is_ingot_prefix(rest) {
+                if let Some(end) = find_matching_paren(content, i) {
+                    expressions.push(content[i..=end].trim());
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+
+    expressions
+}
+
+fn find_matching_paren(content: &str, start: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut depth = 0i32;
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for (idx, b) in bytes.iter().copied().enumerate().skip(start) {
+        if in_quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if b == b'\\' {
+                escaped = true;
+                continue;
+            }
+            if b == b'"' {
+                in_quote = false;
+            }
+            continue;
+        }
+
+        match b {
+            b'"' => in_quote = true,
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -201,6 +268,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_multiline_ingot() {
+        let line = r#"(ingot
+  :id "i1"
+  :status ore
+  :solo t
+  :grade 2
+  :skill web
+  :heat 0
+  :max 5
+  :smelt 0
+  :proof "node --check src/main.js"
+  :work "Wire simulation bootstrap"
+)"#;
+        let ingot = parse_ingot(line).unwrap();
+        assert_eq!(ingot.id, "i1");
+        assert_eq!(ingot.skill, Skill::Web);
+    }
+
+    #[test]
     fn parse_crucible_content() {
         let content = r#";; CRUCIBLE 2026-01-27
 ;; Blueprint: BLUEPRINT.md
@@ -246,5 +332,35 @@ mod tests {
         assert_eq!(ingots[2].grade, 3);
         assert_eq!(ingots[2].max, 8);
         assert!(!ingots[2].solo);
+    }
+
+    #[test]
+    fn parse_crucible_with_markdown_noise() {
+        let content = r#"
+Founder notes:
+- Casting now.
+
+```lisp
+(ingot :id "i1" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof "test -f index.html" :work "Create entrypoint")
+(ingot
+  :id "i2"
+  :status ore
+  :solo nil
+  :grade 2
+  :skill web
+  :heat 0
+  :max 5
+  :smelt 0
+  :proof "node --check src/main.js"
+  :work "Initialize runtime wiring")
+```
+
+All done.
+"#;
+        let ingots = parse_crucible(content);
+        assert_eq!(ingots.len(), 2);
+        assert_eq!(ingots[0].id, "i1");
+        assert_eq!(ingots[1].id, "i2");
+        assert!(!ingots[1].solo);
     }
 }
