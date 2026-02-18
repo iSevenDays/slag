@@ -19,6 +19,7 @@ pub struct SmithConfig {
     pub plan: String,
     pub web: String,
     pub web_plan: String,
+    pub outcome: String,
 }
 
 impl SmithConfig {
@@ -28,11 +29,13 @@ impl SmithConfig {
         let plan = format!("{base} --permission-mode plan");
         let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
         let web_plan = format!("{web} --permission-mode plan");
+        let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| base.clone());
         Self {
             base,
             plan,
             web,
             web_plan,
+            outcome,
         }
     }
 
@@ -81,6 +84,8 @@ pub struct PipelineConfig {
     pub max_retry: usize,
     /// Show detailed forge output
     pub verbose: bool,
+    /// Run independent outcome-validation closing loop
+    pub outcome_gate: bool,
 }
 
 impl PipelineConfig {
@@ -94,6 +99,7 @@ impl PipelineConfig {
         review_all: bool,
         max_retry: usize,
         verbose: bool,
+        outcome_gate: bool,
     ) -> Self {
         Self {
             worktree,
@@ -104,6 +110,7 @@ impl PipelineConfig {
             review_all,
             max_retry,
             verbose,
+            outcome_gate,
         }
     }
 

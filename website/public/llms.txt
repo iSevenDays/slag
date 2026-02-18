@@ -49,20 +49,23 @@ slag update    # Self-update
 | --review-all | Review even if CI fails |
 | --retry N | Max retry cycles when ingots crack (default: 3) |
 | --verbose | Detailed forge output and longer previews |
+| --no-outcome | Disable independent outcome-validation closing loop |
 
 Default output is compact for readability; use `--verbose` for full per-heat details.
+Set `SLAG_SMITH_OUTCOME` to route the independent outcome validator to a faster model profile (for example Sonnet).
 
 ## Pipeline
 
 ```
-PRD.md → SURVEYOR → FOUNDER → FORGE → [REVIEW] → ASSAY → PROGRESS.md
+PRD.md → SURVEYOR → FOUNDER → FORGE → [REVIEW] → OUTCOME → ASSAY → PROGRESS.md
 ```
 
 1. **Surveyor**: Analyze requirements → BLUEPRINT.md
 2. **Founder**: Cast S-expression ingots → PLAN.md
 3. **Forge**: Execute ingots via Claude, verify with proof commands
 4. **Review**: (--worktree) CI checks + AI review before merge
-5. **Assay**: Final report
+5. **Outcome**: Independent validator checks user-visible behavior; queues repair ingots on fail
+6. **Assay**: Final report
 
 ## Ingot Format
 

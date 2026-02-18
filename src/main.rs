@@ -37,6 +37,7 @@ async fn main() {
         cli.review_all,
         cli.retry,
         cli.verbose,
+        !cli.no_outcome,
     );
 
     let result = match cli.command {

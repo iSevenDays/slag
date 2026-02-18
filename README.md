@@ -67,6 +67,14 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--review-all` | off | Review even if CI fails |
 | `--retry N` | 3 | Max retry cycles when ingots crack (0 = no retry) |
 | `--verbose` | off | Show detailed forge output (commands, retries, extended previews) |
+| `--no-outcome` | off | Disable independent outcome-validation closing loop |
+
+**Model routing (env):**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Main smith for survey/founder/forge |
+| `SLAG_SMITH_OUTCOME` | inherits `SLAG_SMITH` | Independent outcome validator (set this to your fast Sonnet command if desired) |
 
 ## Progress display
 
@@ -137,17 +145,17 @@ ore --> molten --> forged
 
 ## How it works
 
-slag runs a 4-phase pipeline (5 phases with `--worktree`):
+slag runs a 5-phase pipeline (6 phases with `--worktree`):
 
 ```
-PRD.md --> SURVEYOR --> BLUEPRINT.md --> FOUNDER --> PLAN.md --> FORGE --> PROGRESS.md
- (ore)    (analyze)    (blueprint)     (design)   (crucible)  (strike)    (ledger)
+PRD.md --> SURVEYOR --> BLUEPRINT.md --> FOUNDER --> PLAN.md --> FORGE --> OUTCOME --> PROGRESS.md
+ (ore)    (analyze)    (blueprint)     (design)   (crucible)  (strike)   (validate)   (ledger)
 
 With --worktree (master review enabled):
-PRD.md --> SURVEYOR --> FOUNDER --> FORGE (branches) --> REVIEW --> ASSAY
-                                         |                  |
-                                    git worktrees      CI + AI review
-                                    per ingot          before merge
+PRD.md --> SURVEYOR --> FOUNDER --> FORGE (branches) --> REVIEW --> OUTCOME --> ASSAY
+                                         |                  |          |
+                                    git worktrees      CI + AI     independent
+                                    per ingot          review      validator
 ```
 
 ### Phase 1: Surveyor
@@ -195,6 +203,17 @@ When ingots crack, slag analyzes failures and can retry automatically (up to `--
 5. **Force retry prompt** -- when no recoverable ingots found, asks user to confirm force retry
 
 This loop continues until all ingots forge, max retries exhausted, or user declines force retry.
+
+### Phase 3.7: Outcome Validation (closing loop)
+
+Even when all ingots are forged, slag runs an **independent validator pass** to verify user-visible outcomes (not just file existence).
+
+1. **Independent check** -- separate tester/commenter prompt evaluates commission vs delivered behavior
+2. **PASS/FAIL decision** -- `PASS` finishes pipeline, `FAIL` must include repair ingots
+3. **Auto-repair loop** -- repair ingots are appended to `PLAN.md` and forged in the next cycle
+4. **Behavior-first proofs** -- validator requires runtime-focused checks (browser/runtime assertions for web/sim apps)
+
+Disable this closing loop with `--no-outcome`.
 
 ### Phase 4: Assay
 

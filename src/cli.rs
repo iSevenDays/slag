@@ -46,6 +46,10 @@ pub struct Cli {
     /// Show detailed forge output (commands, retries, and extra previews)
     #[arg(long)]
     pub verbose: bool,
+
+    /// Disable independent outcome-validation closing loop
+    #[arg(long)]
+    pub no_outcome: bool,
 }
 
 #[derive(Subcommand)]

@@ -41,6 +41,9 @@ pub enum SlagError {
     #[error("CI check failed for branch {branch}: {reason}")]
     CiFailed { branch: String, reason: String },
 
+    #[error("outcome validation failed: {0}")]
+    OutcomeFailed(String),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 

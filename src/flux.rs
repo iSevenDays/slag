@@ -234,7 +234,9 @@ pub fn founder_prompt(ore: &str, blueprint: &str) -> String {
         - :solo nil for dependent tasks (sequential)\n\
         - Prefer grade 1-2, split complex work\n\
         - Match :skill to task type\n\
-        - Every :proof must be executable shell\n\n\
+        - Every :proof must be executable shell\n\
+        - Include at least one end-to-end ingot that validates the primary user-visible outcome\n\
+        - Final integration proofs must test runtime behavior, not only file existence\n\n\
         OUTPUT ONLY S-EXPRESSIONS:"
     )
 }
@@ -357,6 +359,51 @@ pub fn prepare_review_flux(
         } else {
             String::new()
         }
+    )
+}
+
+/// Build the independent outcome-validation prompt.
+/// This is a closing-loop checker focused on user-visible results.
+pub fn prepare_outcome_flux(
+    ore: &str,
+    blueprint: &str,
+    crucible: &str,
+    ledger_tail: &str,
+) -> String {
+    format!(
+        "=== OUTCOME VALIDATION ===\n\
+        ROLE: Independent tester/commenter. You did NOT implement this.\n\
+        Goal: verify the delivered result satisfies the commission from the user's perspective.\n\n\
+        COMMISSION:\n\
+        {ore}\n\n\
+        BLUEPRINT:\n\
+        {blueprint}\n\n\
+        CURRENT CRUCIBLE (all forged work):\n\
+        {crucible}\n\n\
+        RECENT LEDGER:\n\
+        {ledger_tail}\n\n\
+        TASK:\n\
+        1. Decide PASS or FAIL for the actual user outcome.\n\
+        2. Provide ONE executable TEST command that returns exit 0 only if outcome is correct.\n\
+        3. If FAIL, output 1-4 repair ingots with concrete behavior-focused proof commands.\n\
+        4. Proofs must validate runtime/user-visible behavior, not just file existence.\n\
+        5. For web/simulation work, include at least one browser/runtime check (e.g. Playwright or JS assertion).\n\
+        6. For simulations/games, assert core counters are non-zero (for example snakes/entities/agents > 0) and animation is advancing.\n\n\
+        7. Capture browser console errors and fail if any uncaught/runtime errors are present.\n\
+        8. Verify entrypoint wiring: core modules must be imported and initialized, not left as placeholders.\n\
+        9. If telemetry is hardcoded/static (e.g. always 0), mark FAIL and emit repair ingots.\n\
+        10. Prefer 2-4 small repair ingots over one large ingot.\n\n\
+        OUTPUT FORMAT (exactly):\n\
+        STATUS: PASS|FAIL\n\
+        COMMENT: one concise sentence explaining decision\n\
+        TEST: <shell command>\n\
+        (optional on FAIL) one ingot per line:\n\
+        (ingot :id \"v1\" :status ore :solo nil :grade 2 :skill default :heat 0 :max 5 :smelt 0 :proof \"SHELL\" :work \"Fix task\")\n\n\
+        RULES:\n\
+        - No markdown\n\
+        - No questions\n\
+        - TEST must be runnable in the current repo and verify the real outcome\n\
+        - If FAIL, ingots must be actionable and independently verifiable\n"
     )
 }
 

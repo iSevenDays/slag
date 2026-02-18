@@ -38,14 +38,14 @@ slag "Build the REST API from PRD.md"
   (ore)                                             (ledger)
     |                                                 ^
     v                                                 |
- +-----------+    +--------------+    +--------+    +-------+
- | SURVEYOR  |--->| FOUNDER      |--->| FORGE  |--->| ASSAY |
- | analyze   |    | cast ingots  |    | strike |    | report|
- +-----------+    +--------------+    +--------+    +-------+
-    |                    |                    |
-    v                    v                    v
- BLUEPRINT.md        PLAN.md             git commits
- (analysis)        (s-expr ingots)      (per ingot)
+ +-----------+    +--------------+    +--------+    +---------+    +-------+
+ | SURVEYOR  |--->| FOUNDER      |--->| FORGE  |--->| OUTCOME |--->| ASSAY |
+ | analyze   |    | cast ingots  |    | strike |    | validate|    | report|
+ +-----------+    +--------------+    +--------+    +---------+    +-------+
+    |                    |                    |             |
+    v                    v                    v             v
+ BLUEPRINT.md        PLAN.md             git commits   repair ingots
+ (analysis)        (s-expr ingots)      (per ingot)   (on FAIL)
 ```
 
 ## Forge Loop
@@ -84,7 +84,7 @@ slag "Build the REST API from PRD.md"
                          +----- impossible -> :cracked
 ```
 
-## Four Phases
+## Five Phases
 
 ### 1. SURVEYOR
 Deep analysis with plan mode. Reads PRD.md (ore), produces BLUEPRINT.md with architecture, dependency graph, risk assessment, and forging sequence. Self-iterates to resolve any ambiguity.
@@ -97,7 +97,11 @@ Strikes each ingot via Claude. Solo ingots run on parallel anvils (up to 3). Sel
 
 Default forge output is compact for readability. Use `--verbose` for detailed per-heat logs and longer Surveyor/Founder previews.
 
-### 4. ASSAY
+### 4. OUTCOME
+Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.
+Set `SLAG_SMITH_OUTCOME` to run this validator on a faster model profile if desired.
+
+### 5. ASSAY
 Final quality report. Shows forged/cracked counts, temperature bar, and identifies any cracked ingots. Exits 0 on full forge, 1 if any ingot cracked.
 
 ## Design Decisions

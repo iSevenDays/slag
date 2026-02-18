@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod assay;
 pub mod forge;
 pub mod founder;
+pub mod outcome;
 pub mod resmelt;
 pub mod review;
 pub mod surveyor;
@@ -107,7 +108,24 @@ pub async fn run(
         let counts = crucible.counts();
 
         if counts.cracked == 0 {
-            // Success!
+            if pipeline_config.outcome_gate {
+                let validator = ClaudeSmith::new(smith_config.outcome.clone());
+                let outcome_passed =
+                    outcome::validate_and_queue(&validator, cycle, pipeline_config.verbose).await?;
+                if outcome_passed {
+                    break;
+                }
+                if cycle >= max_cycles {
+                    println!(
+                        "\n  \x1b[31m✗\x1b[0m Max retries ({}) exhausted with unresolved outcome failures",
+                        max_cycles - 1
+                    );
+                    break;
+                }
+                println!("\n  \x1b[38;5;220m↺\x1b[0m Outcome failed, forging repair ingots...\n");
+                continue;
+            }
+
             break;
         }
 
@@ -142,6 +160,12 @@ pub async fn run(
     let counts = crucible.counts();
     if counts.cracked > 0 {
         return Err(SlagError::ForgeFailed(counts.cracked));
+    }
+    if crucible.has_pending() {
+        return Err(SlagError::OutcomeFailed(format!(
+            "pipeline ended with {} pending ingot(s)",
+            counts.ore + counts.molten
+        )));
     }
 
     Ok(())
