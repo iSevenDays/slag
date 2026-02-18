@@ -33,12 +33,12 @@ teardown() {
 
 assert_eq() {
     local label="$1" expected="$2" actual="$3"
-    ((TOTAL++))
+    TOTAL=$((TOTAL + 1))
     if [[ "$expected" == "$actual" ]]; then
-        ((PASS++))
+        PASS=$((PASS + 1))
         printf "  \033[32m✓\033[0m %s\n" "$label"
     else
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
         printf "  \033[31m✗\033[0m %s\n" "$label"
         printf "    expected: %s\n" "$expected"
         printf "    actual:   %s\n" "$actual"
@@ -47,12 +47,12 @@ assert_eq() {
 
 assert_contains() {
     local label="$1" needle="$2" haystack="$3"
-    ((TOTAL++))
+    TOTAL=$((TOTAL + 1))
     if [[ "$haystack" == *"$needle"* ]]; then
-        ((PASS++))
+        PASS=$((PASS + 1))
         printf "  \033[32m✓\033[0m %s\n" "$label"
     else
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
         printf "  \033[31m✗\033[0m %s\n" "$label"
         printf "    expected to contain: %s\n" "$needle"
         printf "    actual: %s\n" "$haystack"
@@ -61,12 +61,12 @@ assert_contains() {
 
 assert_file_contains() {
     local label="$1" needle="$2" file="$3"
-    ((TOTAL++))
+    TOTAL=$((TOTAL + 1))
     if grep -q "$needle" "$file" 2>/dev/null; then
-        ((PASS++))
+        PASS=$((PASS + 1))
         printf "  \033[32m✓\033[0m %s\n" "$label"
     else
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
         printf "  \033[31m✗\033[0m %s\n" "$label"
         printf "    file %s does not contain: %s\n" "$file" "$needle"
     fi
@@ -74,12 +74,12 @@ assert_file_contains() {
 
 assert_file_not_contains() {
     local label="$1" needle="$2" file="$3"
-    ((TOTAL++))
+    TOTAL=$((TOTAL + 1))
     if ! grep -q "$needle" "$file" 2>/dev/null; then
-        ((PASS++))
+        PASS=$((PASS + 1))
         printf "  \033[32m✓\033[0m %s\n" "$label"
     else
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
         printf "  \033[31m✗\033[0m %s\n" "$label"
         printf "    file %s should not contain: %s\n" "$file" "$needle"
     fi
@@ -199,11 +199,11 @@ line_i2a=$(grep -n "i2a" "$CRUCIBLE" | head -1 | cut -d: -f1)
 line_i2b=$(grep -n "i2b" "$CRUCIBLE" | head -1 | cut -d: -f1)
 line_i3=$(grep -n '"i3"' "$CRUCIBLE" | head -1 | cut -d: -f1)
 
-((TOTAL++))
+TOTAL=$((TOTAL + 1))
 if [[ $line_i1 -lt $line_i2a && $line_i2a -lt $line_i2b && $line_i2b -lt $line_i3 ]]; then
-    ((PASS++)); printf "  \033[32m✓\033[0m %s\n" "sub-ingots inserted in correct position"
+    PASS=$((PASS + 1)); printf "  \033[32m✓\033[0m %s\n" "sub-ingots inserted in correct position"
 else
-    ((FAIL++)); printf "  \033[31m✗\033[0m %s (order: i1=%s i2a=%s i2b=%s i3=%s)\n" "sub-ingots inserted in correct position" "$line_i1" "$line_i2a" "$line_i2b" "$line_i3"
+    FAIL=$((FAIL + 1)); printf "  \033[31m✗\033[0m %s (order: i1=%s i2a=%s i2b=%s i3=%s)\n" "sub-ingots inserted in correct position" "$line_i1" "$line_i2a" "$line_i2b" "$line_i3"
 fi
 teardown
 
