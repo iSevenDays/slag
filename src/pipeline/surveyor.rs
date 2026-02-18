@@ -5,7 +5,7 @@ use crate::smith::{self, Smith};
 use crate::tui;
 
 /// Phase 1: Analyze the commission (PRD.md) and produce a BLUEPRINT.md
-pub async fn run(smith: &dyn Smith) -> Result<(), SlagError> {
+pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
     tui::header("SURVEYOR · deep analysis");
 
     let ore = std::fs::read_to_string(ORE_FILE).map_err(|_| SlagError::NoOre)?;
@@ -31,11 +31,20 @@ pub async fn run(smith: &dyn Smith) -> Result<(), SlagError> {
     // Show preview
     println!();
     let lines: Vec<&str> = raw.lines().collect();
-    for line in lines.iter().take(20) {
+    let preview_lines = if verbose { 20 } else { 8 };
+    for line in lines.iter().take(preview_lines) {
         println!("  \x1b[90m{line}\x1b[0m");
     }
-    if lines.len() > 20 {
-        println!("\n  \x1b[90m... +{} lines\x1b[0m", lines.len() - 20);
+    if lines.len() > preview_lines {
+        println!(
+            "\n  \x1b[90m... +{} lines{}\x1b[0m",
+            lines.len() - preview_lines,
+            if verbose {
+                ""
+            } else {
+                " (use --verbose for longer preview)"
+            }
+        );
     }
 
     Ok(())

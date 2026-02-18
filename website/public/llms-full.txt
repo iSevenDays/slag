@@ -88,6 +88,9 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--ci-only` | off | Run CI checks but skip AI review |
 | `--review-all` | off | Review even if CI fails |
 | `--retry N` | 3 | Max retry cycles when ingots crack (0 = no retry) |
+| `--verbose` | off | Show detailed forge output (commands, retries, extended previews) |
+
+Output mode: compact by default for readability. Use `--verbose` for full per-heat details and longer Surveyor/Founder previews.
 
 ### Progress Display
 

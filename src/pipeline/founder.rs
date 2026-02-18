@@ -6,7 +6,7 @@ use crate::smith::{self, Smith};
 use crate::tui;
 
 /// Phase 2: Read blueprint and produce S-expression ingots in PLAN.md
-pub async fn run(smith: &dyn Smith) -> Result<(), SlagError> {
+pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
     tui::header("FOUNDER · casting mold");
 
     let ore = std::fs::read_to_string(ORE_FILE).map_err(|_| SlagError::NoOre)?;
@@ -52,8 +52,9 @@ pub async fn run(smith: &dyn Smith) -> Result<(), SlagError> {
     // Show table
     println!();
     println!("  \x1b[90m{:<5} {:<10} WORK\x1b[0m", "ID", "STATUS");
+    let preview_rows = if verbose { 10 } else { 6 };
     for (i, ingot) in ingots.iter().enumerate() {
-        if i >= 10 {
+        if i >= preview_rows {
             break;
         }
         let status_display = match ingot.status {
@@ -69,8 +70,16 @@ pub async fn run(smith: &dyn Smith) -> Result<(), SlagError> {
             tui::truncate(&ingot.work, 55),
         );
     }
-    if count > 10 {
-        println!("  \x1b[90m+{} more\x1b[0m", count - 10);
+    if count > preview_rows {
+        println!(
+            "  \x1b[90m+{} more{}\x1b[0m",
+            count - preview_rows,
+            if verbose {
+                ""
+            } else {
+                " (use --verbose for longer preview)"
+            }
+        );
     }
 
     Ok(())

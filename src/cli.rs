@@ -42,6 +42,10 @@ pub struct Cli {
     /// Max retry cycles when ingots crack (0 = no retry)
     #[arg(long, default_value_t = 3)]
     pub retry: usize,
+
+    /// Show detailed forge output (commands, retries, and extra previews)
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Subcommand)]

@@ -48,6 +48,9 @@ slag update    # Self-update
 | --ci-only | CI checks only, no AI review |
 | --review-all | Review even if CI fails |
 | --retry N | Max retry cycles when ingots crack (default: 3) |
+| --verbose | Detailed forge output and longer previews |
+
+Default output is compact for readability; use `--verbose` for full per-heat details.
 
 ## Pipeline
 

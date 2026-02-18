@@ -26,7 +26,7 @@ pub async fn run(
     // Phase 1: Survey
     if !std::path::Path::new(crate::config::BLUEPRINT).exists() {
         let smith = ClaudeSmith::plan(smith_config);
-        surveyor::run(&smith).await?;
+        surveyor::run(&smith, pipeline_config.verbose).await?;
     }
 
     // Phase 2: Found
@@ -37,7 +37,7 @@ pub async fn run(
     };
     if needs_founder {
         let smith = ClaudeSmith::plan(smith_config);
-        founder::run(&smith).await?;
+        founder::run(&smith, pipeline_config.verbose).await?;
     }
 
     // Phase 3: Forge (with retry loop)
@@ -60,6 +60,15 @@ pub async fn run(
         print!("  ");
         tui::ingot_status_line(&counts);
         println!();
+        println!(
+            "  \x1b[90mcycle {}/{} · done {}/{} · cracked {} · elapsed {}\x1b[0m",
+            cycle,
+            max_cycles,
+            counts.forged,
+            counts.total,
+            counts.cracked,
+            tui::format_elapsed(forge_start.elapsed().as_secs())
+        );
 
         // Run forge (ignore ForgeFailed error - we handle it with analysis)
         let forge_result = forge::run(smith_config, pipeline_config).await;

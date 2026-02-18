@@ -123,10 +123,16 @@ pub fn spark_spinner(msg: &str) -> ProgressBar {
 }
 
 pub fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}...", &s[..max])
+    if max == 0 {
+        return String::new();
+    }
+
+    let mut chars = s.chars();
+    let truncated: String = chars.by_ref().take(max).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
     } else {
-        s.to_string()
+        truncated
     }
 }
 

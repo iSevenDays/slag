@@ -79,6 +79,8 @@ pub struct PipelineConfig {
     pub review_all: bool,
     /// Max retry cycles when ingots crack
     pub max_retry: usize,
+    /// Show detailed forge output
+    pub verbose: bool,
 }
 
 impl PipelineConfig {
@@ -91,6 +93,7 @@ impl PipelineConfig {
         ci_only: bool,
         review_all: bool,
         max_retry: usize,
+        verbose: bool,
     ) -> Self {
         Self {
             worktree,
@@ -100,6 +103,7 @@ impl PipelineConfig {
             ci_only,
             review_all,
             max_retry,
+            verbose,
         }
     }
 

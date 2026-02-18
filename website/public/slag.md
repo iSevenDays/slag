@@ -95,6 +95,8 @@ Casts S-expression ingots from the blueprint. Each ingot has an ID, complexity g
 ### 3. FORGE
 Strikes each ingot via Claude. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.
 
+Default forge output is compact for readability. Use `--verbose` for detailed per-heat logs and longer Surveyor/Founder previews.
+
 ### 4. ASSAY
 Final quality report. Shows forged/cracked counts, temperature bar, and identifies any cracked ingots. Exits 0 on full forge, 1 if any ingot cracked.
 

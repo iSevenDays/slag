@@ -22,6 +22,23 @@ pub struct ForgeResult {
     pub heat_used: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputMode {
+    Quiet,
+    Compact,
+    Verbose,
+}
+
+impl OutputMode {
+    fn is_quiet(self) -> bool {
+        matches!(self, Self::Quiet)
+    }
+
+    fn is_verbose(self) -> bool {
+        matches!(self, Self::Verbose)
+    }
+}
+
 /// Phase 3: Forge loop — parallel anvils then sequential
 /// Returns list of forged branches (empty if not using worktree mode)
 pub async fn run(
@@ -31,6 +48,11 @@ pub async fn run(
     let mut forged_results: Vec<ForgeResult> = Vec::new();
     let use_worktree = pipeline_config.worktree;
     let max_anvils = pipeline_config.max_anvils;
+    let sequential_output_mode = if pipeline_config.verbose {
+        OutputMode::Verbose
+    } else {
+        OutputMode::Compact
+    };
 
     loop {
         let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
@@ -84,7 +106,8 @@ pub async fn run(
                 let worktree_mode = use_worktree;
                 set.spawn(async move {
                     let smith = ClaudeSmith::new(smith_cmd);
-                    let result = strike_ingot(&ingot, &smith, worktree_mode).await;
+                    let result =
+                        strike_ingot(&ingot, &smith, worktree_mode, OutputMode::Quiet).await;
                     (ingot.id.clone(), result)
                 });
             }
@@ -94,12 +117,21 @@ pub async fn run(
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
                 match result {
                     Ok((id, Ok(forge_result))) => {
+                        let heat_used = forge_result.heat_used;
+                        let max_heat = crucible
+                            .get(&id)
+                            .map(|ingot| ingot.max)
+                            .unwrap_or(heat_used);
                         crucible.set_status(&id, Status::Forged);
                         if let Some(ingot) = crucible.get_mut(&id) {
-                            ingot.heat = forge_result.heat_used;
+                            ingot.heat = heat_used;
                         }
                         crucible.save()?;
                         forged_results.push(forge_result);
+                        println!(
+                            "  \x1b[1;37m✓\x1b[0m [{}] forged (heat {}/{})",
+                            id, heat_used, max_heat
+                        );
                     }
                     Ok((id, Err(SlagError::IngotCracked(_, heat_used)))) => {
                         // Try resmelt
@@ -113,9 +145,14 @@ pub async fn run(
                                 .is_ok()
                             {
                                 crucible.save()?;
+                                println!("  \x1b[38;5;220m♻\x1b[0m [{}] re-smelted and queued", id);
                             } else {
                                 crucible.set_status(&id, Status::Cracked);
                                 crucible.save()?;
+                                println!(
+                                    "  \x1b[31m✗\x1b[0m [{}] cracked after {} heat(s)",
+                                    id, heat_used
+                                );
                             }
                         }
                     }
@@ -153,7 +190,7 @@ pub async fn run(
         let smith_cmd = config.select(ingot.skill.as_str(), ingot.grade).to_string();
         let smith = ClaudeSmith::new(smith_cmd);
 
-        match strike_ingot(&ingot, &smith, use_worktree).await {
+        match strike_ingot(&ingot, &smith, use_worktree, sequential_output_mode).await {
             Ok(forge_result) => {
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
                 crucible.set_status(&ingot.id, Status::Forged);
@@ -196,6 +233,7 @@ async fn strike_ingot(
     ingot: &Ingot,
     smith: &dyn Smith,
     worktree_mode: bool,
+    output_mode: OutputMode,
 ) -> Result<ForgeResult, SlagError> {
     let mut slag: Option<String> = None;
     let mut worktree_path: Option<String> = None;
@@ -206,64 +244,78 @@ async fn strike_ingot(
         match worktree::create(&ingot.id).await {
             Ok(path) => {
                 worktree_path = Some(path.clone());
-                println!(
-                    "    \x1b[90m↳ worktree: {}\x1b[0m",
-                    tui::truncate(&path, 40)
-                );
+                if output_mode.is_verbose() {
+                    println!(
+                        "    \x1b[90m↳ worktree: {}\x1b[0m",
+                        tui::truncate(&path, 40)
+                    );
+                }
             }
             Err(e) => {
-                eprintln!("    \x1b[31m✗\x1b[0m worktree create failed: {e}");
+                if !output_mode.is_quiet() {
+                    eprintln!("    \x1b[31m✗\x1b[0m worktree create failed: {e}");
+                }
                 return Err(e);
             }
         }
     }
 
-    println!(
-        "\n  \x1b[38;5;208m▣\x1b[0m \x1b[1;37m[{}]\x1b[0m {}{}{}",
-        ingot.id,
-        tui::truncate(&ingot.work, 42),
-        if ingot.is_complex() {
-            " \x1b[38;5;220m◉\x1b[0m"
-        } else {
-            ""
-        },
-        if ingot.is_web() {
-            " \x1b[38;5;208m⚡\x1b[0m"
-        } else {
-            ""
-        },
-    );
-    println!(
-        "    \x1b[90mgr:{} skill:{} proof:{}\x1b[0m",
-        ingot.grade,
-        ingot.skill,
-        tui::truncate(&ingot.proof, 30),
-    );
+    if !output_mode.is_quiet() {
+        println!(
+            "\n  \x1b[38;5;208m▣\x1b[0m \x1b[1;37m[{}]\x1b[0m {}{}{}",
+            ingot.id,
+            tui::truncate(&ingot.work, 42),
+            if ingot.is_complex() {
+                " \x1b[38;5;220m◉\x1b[0m"
+            } else {
+                ""
+            },
+            if ingot.is_web() {
+                " \x1b[38;5;208m⚡\x1b[0m"
+            } else {
+                ""
+            },
+        );
+        if output_mode.is_verbose() {
+            println!(
+                "    \x1b[90mgr:{} skill:{} proof:{}\x1b[0m",
+                ingot.grade,
+                ingot.skill,
+                tui::truncate(&ingot.proof, 30),
+            );
+        }
+    }
 
     for heat in 1..=ingot.max {
-        let hc = match heat {
-            1..=2 => "\x1b[31m",
-            3 => "\x1b[38;5;208m",
-            4 => "\x1b[38;5;220m",
-            _ => "\x1b[1;37m",
-        };
-        print!(
-            "    {hc}{} {heat}/{}\x1b[0m ",
-            tui::heat_bar(heat, ingot.max),
-            ingot.max
-        );
+        if output_mode.is_verbose() {
+            let hc = match heat {
+                1..=2 => "\x1b[31m",
+                3 => "\x1b[38;5;208m",
+                4 => "\x1b[38;5;220m",
+                _ => "\x1b[1;37m",
+            };
+            print!(
+                "    {hc}{} {heat}/{}\x1b[0m ",
+                tui::heat_bar(heat, ingot.max),
+                ingot.max
+            );
+        }
 
         let flux_text = flux::prepare_flux(ingot, slag.as_deref());
         log_to_file(&format!("FLUX_{}_{heat}", ingot.id), &flux_text);
 
-        let spinner_msg = if ingot.is_complex() {
-            "planning..."
-        } else if ingot.is_web() {
-            "web forging..."
+        let spinner = if output_mode.is_quiet() {
+            None
         } else {
-            "forging..."
+            let spinner_msg = if output_mode.is_verbose() && ingot.is_complex() {
+                "planning..."
+            } else if output_mode.is_verbose() && ingot.is_web() {
+                "web forging..."
+            } else {
+                "forging..."
+            };
+            Some(tui::spinner(spinner_msg))
         };
-        let spinner = tui::spinner(spinner_msg);
 
         // In worktree mode, invoke smith in the worktree directory
         let response = if let Some(ref wt_path) = worktree_path {
@@ -274,13 +326,23 @@ async fn strike_ingot(
 
         let response = match response {
             Ok(r) => {
-                spinner.finish_and_clear();
+                if let Some(ref spinner) = spinner {
+                    spinner.finish_and_clear();
+                }
                 r
             }
             Err(e) => {
-                spinner.finish_and_clear();
+                if let Some(ref spinner) = spinner {
+                    spinner.finish_and_clear();
+                }
                 slag = Some(format!("Smith error: {e}"));
-                println!("\x1b[31m✗\x1b[0m");
+                if !output_mode.is_quiet() {
+                    if output_mode.is_verbose() {
+                        println!("\x1b[31m✗\x1b[0m");
+                    } else {
+                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                    }
+                }
                 continue;
             }
         };
@@ -292,13 +354,21 @@ async fn strike_ingot(
             Some(c) => c,
             None => {
                 slag = Some("NO CMD: line in response".into());
-                println!("\x1b[31m✗\x1b[0m smith output missing \"CMD:\" line");
+                if !output_mode.is_quiet() {
+                    if output_mode.is_verbose() {
+                        println!("\x1b[31m✗\x1b[0m smith output missing \"CMD:\" line");
+                    } else {
+                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                    }
+                }
                 continue;
             }
         };
 
-        print!("\x1b[90m{}\x1b[0m ", tui::truncate(&cmd, 32));
-        tui::flush();
+        if output_mode.is_verbose() {
+            print!("\x1b[90m{}\x1b[0m ", tui::truncate(&cmd, 32));
+            tui::flush();
+        }
 
         // Run CMD (in worktree if applicable)
         let (ok, output) = if let Some(ref wt_path) = worktree_path {
@@ -321,15 +391,27 @@ async fn strike_ingot(
                 };
                 if !proof_ok {
                     slag = Some(format!("Proof failed [{}]: {proof_output}", ingot.proof));
-                    println!(
-                        "\x1b[31m✗\x1b[0m proof failed: {} (exit 1)",
-                        tui::truncate(&ingot.proof, 30)
-                    );
+                    if !output_mode.is_quiet() {
+                        if output_mode.is_verbose() {
+                            println!(
+                                "\x1b[31m✗\x1b[0m proof failed: {} (exit 1)",
+                                tui::truncate(&ingot.proof, 30)
+                            );
+                        } else {
+                            println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                        }
+                    }
                     continue;
                 }
             }
 
-            println!("\x1b[1;37m█\x1b[0m");
+            if !output_mode.is_quiet() {
+                if output_mode.is_verbose() {
+                    println!("\x1b[1;37m█\x1b[0m");
+                } else {
+                    println!("    \x1b[1;37m✓\x1b[0m forged (heat {heat}/{})", ingot.max);
+                }
+            }
 
             // Commit in worktree or main repo
             if let Some(ref wt_path) = worktree_path {
@@ -351,7 +433,13 @@ async fn strike_ingot(
             });
         } else {
             slag = Some(format!("CMD failed (exit 1): {output}"));
-            println!("\x1b[31m✗\x1b[0m");
+            if !output_mode.is_quiet() {
+                if output_mode.is_verbose() {
+                    println!("\x1b[31m✗\x1b[0m");
+                } else {
+                    println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                }
+            }
         }
     }
 
