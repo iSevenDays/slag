@@ -4,11 +4,13 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.16
+## What's new in v1.3.17
 
-- Stale molten recovery prompt: when forge finds interrupted `molten` ingots with no runnable `ore`, it now prompts for action: `requeue` (default), `crack`, or `abort`.
-- Re-forge ETA hint: the stale-state prompt includes a best-effort time estimate based on recent forge logs.
-- Safer unattended behavior: in non-interactive runs, stale `molten` ingots auto-requeue to `ore` so CI/headless runs do not hang.
+- No more hanging prompts: prompt decisions are unified behind `--prompt-policy` and `--prompt-timeout-secs`.
+- Clearer control-flow errors: operator aborts and stale-state aborts are now explicit typed orchestration errors.
+- Structured run logs: run-scoped event traces at `logs/runs/<run_id>/events.jsonl` with optional `--log-format json`.
+- Independent reviewer lanes: `build`, `behavior`, and `risk` lanes with strict `STATUS/EVIDENCE/FIX_INGOTS` contracts.
+- Prompt repetition defaults for non-plan calls (paper-backed) with guardrails via `SLAG_PROMPT_REPEAT_*`.
 
 ## Install
 
@@ -106,6 +108,8 @@ Strikes each ingot via the configured smith. Solo ingots run on parallel anvils 
 Default forge output is compact for readability. Use `--verbose` (or `--debug`) for detailed per-heat logs, longer Surveyor/Founder previews, and periodic stall heartbeats.
 Set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to control verbose heartbeat cadence for long-running anvils.
 If a previous run crashed and left ingots in `molten` state, forge now prompts with options to `requeue` (default), `crack`, or `abort`; in non-interactive runs it defaults to `requeue`. The prompt includes a best-effort re-forge time estimate from recent logs.
+Operator prompts are unified behind policy + timeout controls (`--prompt-policy`, `--prompt-timeout-secs`; env: `SLAG_PROMPT_POLICY`, `SLAG_PROMPT_TIMEOUT_SECS`) so loops do not sit waiting forever.
+Prompt repetition (arXiv:2512.14982) is now used in smith invocations by default for non-plan calls (`SLAG_PROMPT_REPEAT_MODE=non-plan`, `SLAG_PROMPT_REPEAT_COUNT=2`, max chars via `SLAG_PROMPT_REPEAT_MAX_CHARS`).
 
 ### 4. OUTCOME
 Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.
@@ -116,6 +120,7 @@ For web/simulation outcomes, outcome TEST commands must be headless and emit a s
 For uncertain web outcomes, slag can force deterministic validation via `scripts/outcome_web_smoke.js` (page loads, runtime metric > 0, zero console errors, screenshot artifact).
 Founder/outcome confidence is scored; thresholds come from `SLAG_CONFIDENCE_THRESHOLD` or phase overrides (`SLAG_FOUNDER_CONFIDENCE_THRESHOLD`, `SLAG_OUTCOME_CONFIDENCE_THRESHOLD`).
 Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `kimi`, `codex`, `gemini`, `opencode`, then `claude`; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
+Set `--log-format json` (or `SLAG_LOG_FORMAT=json`) to emit structured event logs while still writing run-scoped traces under `logs/runs/<run_id>/events.jsonl`.
 
 ### 5. ASSAY
 Final quality report. Shows forged/cracked counts, temperature bar, and identifies any cracked ingots. Exits 0 on full forge, 1 if any ingot cracked.

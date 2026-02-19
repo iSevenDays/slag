@@ -44,6 +44,12 @@ pub enum SlagError {
     #[error("outcome validation failed: {0}")]
     OutcomeFailed(String),
 
+    #[error("operator aborted: {0}")]
+    OperatorAbort(String),
+
+    #[error("state recovery aborted: {0}")]
+    StateRecoveryAbort(String),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 

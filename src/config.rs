@@ -12,6 +12,7 @@ pub const LOG_DIR: &str = "logs";
 pub const MAX_ANVILS: usize = 3;
 pub const HIGH_GRADE: u8 = 3;
 pub const MAX_ITERATE: usize = 3;
+pub const DEFAULT_PROMPT_TIMEOUT_SECS: u64 = 45;
 
 const CLAUDE_SMITH_DEFAULT: &str = "claude --dangerously-skip-permissions -p";
 const KIMI_CLAUDE_WRAPPER: &str = "kimi --dangerously-skip-permissions -p";
@@ -235,6 +236,64 @@ pub struct PipelineConfig {
     pub verbose: bool,
     /// Run independent outcome-validation closing loop
     pub outcome_gate: bool,
+    /// Operator prompt handling policy
+    pub prompt_policy: PromptPolicy,
+    /// Prompt timeout in seconds for interactive choices
+    pub prompt_timeout_secs: u64,
+    /// Terminal log renderer format
+    pub log_format: LogFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PromptPolicy {
+    #[default]
+    Ask,
+    AutoRequeue,
+    AutoCrack,
+    AutoAbort,
+}
+
+impl PromptPolicy {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ask" => Some(Self::Ask),
+            "auto-requeue" | "autorequeue" | "requeue" => Some(Self::AutoRequeue),
+            "auto-crack" | "autocrack" | "crack" => Some(Self::AutoCrack),
+            "auto-abort" | "autoabort" | "abort" => Some(Self::AutoAbort),
+            _ => None,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        std::env::var("SLAG_PROMPT_POLICY")
+            .ok()
+            .and_then(|v| Self::parse(&v))
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogFormat {
+    #[default]
+    Text,
+    Json,
+}
+
+impl LogFormat {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "text" => Some(Self::Text),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        std::env::var("SLAG_LOG_FORMAT")
+            .ok()
+            .and_then(|v| Self::parse(&v))
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -270,6 +329,35 @@ mod tests {
         let selected = choose_detected_smith(|_| false, false);
         assert_eq!(selected, None);
     }
+
+    #[test]
+    fn prompt_policy_parse_aliases() {
+        assert_eq!(PromptPolicy::parse("ask"), Some(PromptPolicy::Ask));
+        assert_eq!(
+            PromptPolicy::parse("auto-requeue"),
+            Some(PromptPolicy::AutoRequeue)
+        );
+        assert_eq!(
+            PromptPolicy::parse("autorequeue"),
+            Some(PromptPolicy::AutoRequeue)
+        );
+        assert_eq!(
+            PromptPolicy::parse("auto-crack"),
+            Some(PromptPolicy::AutoCrack)
+        );
+        assert_eq!(
+            PromptPolicy::parse("auto-abort"),
+            Some(PromptPolicy::AutoAbort)
+        );
+        assert_eq!(PromptPolicy::parse("invalid"), None);
+    }
+
+    #[test]
+    fn log_format_parse_variants() {
+        assert_eq!(LogFormat::parse("text"), Some(LogFormat::Text));
+        assert_eq!(LogFormat::parse("json"), Some(LogFormat::Json));
+        assert_eq!(LogFormat::parse("invalid"), None);
+    }
 }
 
 impl PipelineConfig {
@@ -284,6 +372,9 @@ impl PipelineConfig {
         max_retry: usize,
         verbose: bool,
         outcome_gate: bool,
+        prompt_policy: PromptPolicy,
+        prompt_timeout_secs: u64,
+        log_format: LogFormat,
     ) -> Self {
         Self {
             worktree,
@@ -295,6 +386,9 @@ impl PipelineConfig {
             max_retry,
             verbose,
             outcome_gate,
+            prompt_policy,
+            prompt_timeout_secs,
+            log_format,
         }
     }
 

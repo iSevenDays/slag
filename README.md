@@ -8,11 +8,13 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.16
+## What's new in v1.3.17
 
-- **Stale molten recovery prompt:** when forge finds interrupted `molten` ingots with no runnable `ore`, it now prompts for action: `requeue` (default), `crack`, or `abort`.
-- **Re-forge ETA hint:** the stale-state prompt includes a best-effort time estimate based on recent forge logs.
-- **Safer unattended behavior:** in non-interactive runs, stale `molten` ingots auto-requeue to `ore` so CI/headless runs do not hang.
+- **No more hanging prompts:** prompt decisions are unified behind `--prompt-policy` plus `--prompt-timeout-secs`.
+- **Clearer control-flow errors:** operator aborts and stale-state aborts now use typed orchestration errors.
+- **Structured run logs:** new event bus with run-scoped traces at `logs/runs/<run_id>/events.jsonl` and optional `--log-format json`.
+- **Independent reviewer lanes:** review now runs `build`, `behavior`, and `risk` lanes with strict `STATUS/EVIDENCE/FIX_INGOTS` contracts.
+- **Prompt repetition (paper-backed):** non-plan smith calls now default to prompt repetition with configurable guardrails (`SLAG_PROMPT_REPEAT_*`).
 
 ## Install
 
@@ -74,6 +76,9 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--retry N` | 3 | Max retry cycles when ingots crack (0 = no retry) |
 | `--verbose` (`--debug`) | off | Show detailed forge output (commands, retries, extended previews, and stall heartbeats) |
 | `--no-outcome` | off | Disable independent outcome-validation closing loop |
+| `--prompt-policy MODE` | `ask` | Operator prompt behavior: `ask`, `auto-requeue`, `auto-crack`, `auto-abort` |
+| `--prompt-timeout-secs N` | 45 | Prompt timeout before default action |
+| `--log-format FORMAT` | `text` | Output renderer format: `text` or `json` |
 
 **Model routing (env):**
 
@@ -93,6 +98,12 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each validator/recast response before fallback fail path |
 | `SLAG_SUBAGENT_TIMEOUT_SECS` | `90` | Max seconds for each subagent fallback invocation |
 | `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
+| `SLAG_PROMPT_POLICY` | `ask` | Default operator prompt behavior (`ask`, `auto-requeue`, `auto-crack`, `auto-abort`) |
+| `SLAG_PROMPT_TIMEOUT_SECS` | `45` | Default prompt timeout when flag is not provided |
+| `SLAG_LOG_FORMAT` | `text` | Default log format (`text` or `json`) |
+| `SLAG_PROMPT_REPEAT_MODE` | `non-plan` | Prompt repetition mode (`off`, `non-plan`, `always`) |
+| `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
+| `SLAG_PROMPT_REPEAT_MAX_CHARS` | `12000` | Skip repetition if prompt exceeds this size |
 
 When `SLAG_SMITH` is unset, slag picks the first available smith in this order:
 `kimi` (native Kimi CLI uses print-mode wrapper), `codex`, `gemini`, `opencode`, then `claude`.
@@ -117,6 +128,8 @@ The percentage shows overall progress: forged ingots / total ingots.
 By default, forge output is compact and optimized for readability. Use `--verbose` for full per-heat details and longer previews during Surveyor/Founder phases.
 Set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to control verbose heartbeat cadence for long-running anvils.
 If a previous run crashed and left ingots in `molten` state, forge now prompts with options to `requeue` (default), `crack`, or `abort`; in non-interactive runs it defaults to `requeue`. The prompt includes a best-effort re-forge time estimate from recent logs.
+Operator prompts are now policy-driven (`--prompt-policy`) and timeout-bounded (`--prompt-timeout-secs`) to prevent stalled loops.
+Based on prompt repetition results (arXiv:2512.14982), smith calls now repeat prompts by default for non-plan invocations with configurable guardrails via `SLAG_PROMPT_REPEAT_*`.
 
 ## Language
 

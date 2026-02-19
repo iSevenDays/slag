@@ -8,6 +8,32 @@ use tokio::process::Command;
 use super::Smith;
 use crate::config::SmithConfig;
 use crate::error::SlagError;
+use crate::events;
+
+const DEFAULT_PROMPT_REPEAT_COUNT: usize = 2;
+const DEFAULT_PROMPT_REPEAT_MAX_CHARS: usize = 12_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptRepeatMode {
+    Off,
+    NonPlan,
+    Always,
+}
+
+impl PromptRepeatMode {
+    fn from_env() -> Self {
+        match std::env::var("SLAG_PROMPT_REPEAT_MODE")
+            .unwrap_or_else(|_| "non-plan".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "off" | "never" | "0" => Self::Off,
+            "always" | "all" | "on" => Self::Always,
+            _ => Self::NonPlan,
+        }
+    }
+}
 
 /// Claude CLI smith that spawns `claude -p` as a subprocess.
 pub struct ClaudeSmith {
@@ -38,6 +64,7 @@ impl ClaudeSmith {
     }
 
     async fn invoke_impl(&self, prompt: &str, cwd: Option<&Path>) -> Result<String, SlagError> {
+        let repeated_prompt = maybe_repeat_prompt(prompt, &self.command);
         let parts: Vec<&str> = shell_words(&self.command);
         if parts.is_empty() {
             return Err(SlagError::SmithFailed("empty smith command".into()));
@@ -61,7 +88,7 @@ impl ClaudeSmith {
 
         if let Some(mut stdin) = child.stdin.take() {
             stdin
-                .write_all(prompt.as_bytes())
+                .write_all(repeated_prompt.as_bytes())
                 .await
                 .map_err(|e| SlagError::SmithFailed(format!("stdin write failed: {e}")))?;
         }
@@ -82,6 +109,73 @@ impl ClaudeSmith {
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+}
+
+fn maybe_repeat_prompt(prompt: &str, command: &str) -> String {
+    let mode = PromptRepeatMode::from_env();
+    let count = std::env::var("SLAG_PROMPT_REPEAT_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_PROMPT_REPEAT_COUNT)
+        .clamp(1, 4);
+    let max_chars = std::env::var("SLAG_PROMPT_REPEAT_MAX_CHARS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_PROMPT_REPEAT_MAX_CHARS);
+
+    if count <= 1 {
+        return prompt.to_string();
+    }
+    if prompt.len() > max_chars {
+        events::emit_debug(
+            "smith.prompt_repeat.skip_too_long",
+            "skipped prompt repetition due to max length guard",
+            serde_json::json!({
+                "prompt_chars": prompt.len(),
+                "max_chars": max_chars
+            }),
+        );
+        return prompt.to_string();
+    }
+    if !should_repeat(mode, command) {
+        return prompt.to_string();
+    }
+
+    events::emit_debug(
+        "smith.prompt_repeat.applied",
+        "applied prompt repetition",
+        serde_json::json!({
+            "mode": format!("{mode:?}"),
+            "count": count,
+            "prompt_chars": prompt.len(),
+            "command_has_plan": command.contains("--permission-mode plan")
+        }),
+    );
+
+    repeat_prompt(prompt, count)
+}
+
+fn should_repeat(mode: PromptRepeatMode, command: &str) -> bool {
+    match mode {
+        PromptRepeatMode::Off => false,
+        PromptRepeatMode::Always => true,
+        PromptRepeatMode::NonPlan => !command.contains("--permission-mode plan"),
+    }
+}
+
+fn repeat_prompt(prompt: &str, count: usize) -> String {
+    if count <= 1 {
+        return prompt.to_string();
+    }
+    let mut out = String::with_capacity(prompt.len() * count + 2 * (count - 1));
+    for idx in 0..count {
+        if idx > 0 {
+            out.push('\n');
+            out.push('\n');
+        }
+        out.push_str(prompt);
+    }
+    out
 }
 
 impl Smith for ClaudeSmith {
@@ -180,5 +274,23 @@ mod tests {
             words,
             vec!["claude", "-p", "--allowedTools", "Bash Edit Read"]
         );
+    }
+
+    #[test]
+    fn repeat_prompt_duplicates_with_separator() {
+        let repeated = repeat_prompt("abc", 2);
+        assert_eq!(repeated, "abc\n\nabc");
+    }
+
+    #[test]
+    fn non_plan_mode_detects_plan_flag() {
+        assert!(!should_repeat(
+            PromptRepeatMode::NonPlan,
+            "claude -p --permission-mode plan"
+        ));
+        assert!(should_repeat(
+            PromptRepeatMode::NonPlan,
+            "claude -p --dangerously-skip-permissions"
+        ));
     }
 }

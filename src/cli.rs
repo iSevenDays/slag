@@ -1,3 +1,4 @@
+use crate::config::{LogFormat, PromptPolicy};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -50,6 +51,18 @@ pub struct Cli {
     /// Disable independent outcome-validation closing loop
     #[arg(long)]
     pub no_outcome: bool,
+
+    /// Operator prompt policy (ask|auto-requeue|auto-crack|auto-abort)
+    #[arg(long, value_enum)]
+    pub prompt_policy: Option<PromptPolicyArg>,
+
+    /// Timeout for interactive prompts in seconds
+    #[arg(long)]
+    pub prompt_timeout_secs: Option<u64>,
+
+    /// Log renderer format (text or json)
+    #[arg(long, value_enum)]
+    pub log_format: Option<LogFormatArg>,
 }
 
 #[derive(Subcommand)]
@@ -62,6 +75,40 @@ pub enum Command {
 
     /// Self-update to latest release
     Update,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum PromptPolicyArg {
+    Ask,
+    AutoRequeue,
+    AutoCrack,
+    AutoAbort,
+}
+
+impl PromptPolicyArg {
+    pub fn to_config(self) -> PromptPolicy {
+        match self {
+            Self::Ask => PromptPolicy::Ask,
+            Self::AutoRequeue => PromptPolicy::AutoRequeue,
+            Self::AutoCrack => PromptPolicy::AutoCrack,
+            Self::AutoAbort => PromptPolicy::AutoAbort,
+        }
+    }
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum LogFormatArg {
+    Text,
+    Json,
+}
+
+impl LogFormatArg {
+    pub fn to_config(self) -> LogFormat {
+        match self {
+            Self::Text => LogFormat::Text,
+            Self::Json => LogFormat::Json,
+        }
+    }
 }
 
 impl Cli {

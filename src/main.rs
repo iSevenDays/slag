@@ -5,9 +5,11 @@ mod cli;
 mod config;
 mod crucible;
 mod error;
+mod events;
 mod flux;
 mod pipeline;
 mod progress;
+mod prompt;
 mod proof;
 mod sexp;
 mod smith;
@@ -19,7 +21,7 @@ use std::path::Path;
 use clap::Parser;
 
 use cli::{Cli, Command};
-use config::{PipelineConfig, SmithConfig};
+use config::{LogFormat, PipelineConfig, PromptPolicy, SmithConfig, DEFAULT_PROMPT_TIMEOUT_SECS};
 
 #[tokio::main]
 async fn main() {
@@ -27,6 +29,26 @@ async fn main() {
 
     // Ensure logs directory exists
     let _ = std::fs::create_dir_all(config::LOG_DIR);
+
+    let prompt_policy = cli
+        .prompt_policy
+        .map(|policy| policy.to_config())
+        .unwrap_or_else(PromptPolicy::from_env);
+    let prompt_timeout_secs = cli
+        .prompt_timeout_secs
+        .or_else(|| {
+            std::env::var("SLAG_PROMPT_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+        })
+        .filter(|secs| *secs > 0)
+        .unwrap_or(DEFAULT_PROMPT_TIMEOUT_SECS);
+    let log_format = cli
+        .log_format
+        .map(|fmt| fmt.to_config())
+        .unwrap_or_else(LogFormat::from_env);
+
+    let _ = events::init(log_format, cli.verbose);
 
     let pipeline_config = PipelineConfig::new(
         cli.worktree,
@@ -38,6 +60,9 @@ async fn main() {
         cli.retry,
         cli.verbose,
         !cli.no_outcome,
+        prompt_policy,
+        prompt_timeout_secs,
+        log_format,
     );
 
     let result = match cli.command {

@@ -217,7 +217,7 @@ pub fn founder_prompt(ore: &str, blueprint: &str) -> String {
         BLUEPRINT:\n{blueprint}\n\n\
         OUTPUT: S-expressions only. One per line. No prose.\n\n\
         TEMPLATE:\n\
-        (ingot :id \"i1\" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :proof \"SHELL\" :work \"Task\")\n\n\
+        (ingot :id \"i1\" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :proof \"test -f src/main.js\" :work \"Verify project entrypoint exists\")\n\n\
         FIELDS:\n\
         - :id = unique (i1, i2, ...)\n\
         - :status = ore (always)\n\
@@ -274,7 +274,7 @@ pub fn founder_recast_prompt(ore: &str, blueprint: &str, previous_output: &str) 
         - Include at least one integration ingot with runtime behavior proof\n\
         - Produce at least 8 ingots if the blueprint supports it\n\n\
         TEMPLATE:\n\
-        (ingot :id \"i1\" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof \"SHELL\" :work \"Task\")\n\n\
+        (ingot :id \"i1\" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof \"test -f src/main.js\" :work \"Verify project entrypoint exists\")\n\n\
         OUTPUT ONLY INGOT LINES:"
     )
 }
@@ -305,7 +305,7 @@ pub fn regenerate_prompt(cracked_descriptions: &str) -> String {
         Mark dependencies as :solo nil (sequential).\n\
         Keep grade low (1-2) unless truly complex.\n\n\
         TEMPLATE:\n\
-        (ingot :id \"r1\" :status ore :solo nil :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof \"SHELL\" :work \"Task\")\n\n\
+        (ingot :id \"r1\" :status ore :solo nil :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof \"node --check src/main.js\" :work \"Validate runtime entrypoint parses\")\n\n\
         RULES:\n\
         - Foundation tasks (creating files/dirs) MUST be :solo nil\n\
         - Tasks that modify existing files MUST be :solo nil\n\
@@ -400,6 +400,71 @@ pub fn prepare_review_flux(
     )
 }
 
+/// Build a structured reviewer-lane prompt with strict output contract.
+pub fn prepare_reviewer_lane_flux(
+    lane: &str,
+    ingot_id: &str,
+    branch: &str,
+    diff: &str,
+    ci_result: &crate::pipeline::review::CiResult,
+) -> String {
+    let lane_focus = match lane {
+        "build" => {
+            "Build integrity and integration correctness. Prioritize compile/runtime breakage and testability."
+        }
+        "behavior" => {
+            "User-visible behavior and requirement fulfillment. Prioritize missing outcome behavior and regressions."
+        }
+        "risk" => {
+            "Operational and code risks. Prioritize edge cases, failure modes, safety, and maintainability risks."
+        }
+        _ => "General software quality review.",
+    };
+
+    let fmt_status = if ci_result.fmt_passed {
+        "PASSED"
+    } else {
+        "FAILED"
+    };
+    let clippy_status = if ci_result.clippy_passed {
+        "PASSED"
+    } else {
+        "FAILED"
+    };
+    let test_status = if ci_result.test_passed {
+        "PASSED"
+    } else {
+        "FAILED"
+    };
+
+    format!(
+        "=== REVIEWER LANE ({lane}) ===\n\
+        ROLE: Independent reviewer lane.\n\
+        Focus: {lane_focus}\n\n\
+        INGOT: {ingot_id}\n\
+        BRANCH: {branch}\n\n\
+        CI RESULTS:\n\
+        - fmt: {fmt_status}\n\
+        - clippy: {clippy_status}\n\
+        - test: {test_status}\n\n\
+        DIFF:\n\
+        {diff}\n\n\
+        OUTPUT FORMAT (exactly):\n\
+        STATUS: PASS|FAIL\n\
+        EVIDENCE: one concise sentence\n\
+        FIX_INGOTS: NONE|PRESENT\n\
+        (optional, only if FIX_INGOTS: PRESENT) one ingot per line:\n\
+        (ingot :id \"v1\" :status ore :solo nil :grade 2 :skill default :heat 0 :max 5 :smelt 0 :proof \"npm test\" :work \"Fix failing runtime behavior\")\n\n\
+        RULES:\n\
+        - No markdown\n\
+        - No prose outside the required fields\n\
+        - If STATUS is PASS, FIX_INGOTS must be NONE\n\
+        - If STATUS is FAIL, include FIX_INGOTS: PRESENT and 1-4 actionable ingots\n\
+        - Every fix ingot must include concrete :proof and :work\n\
+        - Keep fix ingots minimal and verifiable\n"
+    )
+}
+
 /// Build the independent outcome-validation prompt.
 /// This is a closing-loop checker focused on user-visible results.
 pub fn prepare_outcome_flux(
@@ -437,7 +502,7 @@ pub fn prepare_outcome_flux(
         COMMENT: one concise sentence explaining decision\n\
         TEST: <shell command>\n\
         (optional on FAIL) one ingot per line:\n\
-        (ingot :id \"v1\" :status ore :solo nil :grade 2 :skill default :heat 0 :max 5 :smelt 0 :proof \"SHELL\" :work \"Fix task\")\n\n\
+        (ingot :id \"v1\" :status ore :solo nil :grade 2 :skill default :heat 0 :max 5 :smelt 0 :proof \"npm test\" :work \"Fix failing runtime behavior\")\n\n\
         RULES:\n\
         - No markdown\n\
         - No questions\n\
@@ -476,7 +541,7 @@ pub fn prepare_outcome_recast_flux(
         COMMENT: one concise sentence\n\
         TEST: <single executable shell command>\n\
         (optional on FAIL) one ingot per line:\n\
-        (ingot :id \"v1\" :status ore :solo nil :grade 2 :skill default :heat 0 :max 5 :smelt 0 :proof \"SHELL\" :work \"Fix task\")\n\n\
+        (ingot :id \"v1\" :status ore :solo nil :grade 2 :skill default :heat 0 :max 5 :smelt 0 :proof \"npm test\" :work \"Fix failing runtime behavior\")\n\n\
         RULES:\n\
         - No markdown\n\
         - No XML/JSON wrappers\n\

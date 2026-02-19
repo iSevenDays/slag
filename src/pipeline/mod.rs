@@ -10,6 +10,7 @@ pub mod surveyor;
 use crate::config::{PipelineConfig, SmithConfig};
 use crate::crucible::Crucible;
 use crate::error::SlagError;
+use crate::events;
 use crate::smith::claude::ClaudeSmith;
 use crate::tui;
 
@@ -19,6 +20,19 @@ pub async fn run(
     smith_config: &SmithConfig,
     pipeline_config: &PipelineConfig,
 ) -> Result<(), SlagError> {
+    events::emit_info(
+        "pipeline.start",
+        "pipeline run started",
+        serde_json::json!({
+            "worktree": pipeline_config.worktree,
+            "max_anvils": pipeline_config.max_anvils,
+            "max_retry": pipeline_config.max_retry,
+            "outcome_gate": pipeline_config.outcome_gate,
+            "prompt_policy": format!("{:?}", pipeline_config.prompt_policy),
+            "prompt_timeout_secs": pipeline_config.prompt_timeout_secs,
+            "log_format": format!("{:?}", pipeline_config.log_format),
+        }),
+    );
     tui::show_banner();
 
     // Fire furnace if needed
@@ -75,6 +89,17 @@ pub async fn run(
             counts.cracked,
             tui::format_elapsed(forge_start.elapsed().as_secs())
         );
+        events::emit_info(
+            "forge.cycle.start",
+            "forge cycle started",
+            serde_json::json!({
+                "cycle": cycle,
+                "max_cycles": max_cycles,
+                "forged": counts.forged,
+                "total": counts.total,
+                "cracked": counts.cracked
+            }),
+        );
 
         // Run forge (ignore ForgeFailed error - we handle it with analysis)
         let forge_result = forge::run(smith_config, pipeline_config).await;
@@ -123,6 +148,11 @@ pub async fn run(
                 )
                 .await?;
                 if outcome_passed {
+                    events::emit_info(
+                        "outcome.pass",
+                        "outcome validator passed",
+                        serde_json::json!({ "cycle": cycle }),
+                    );
                     break;
                 }
                 if cycle >= max_cycles {
@@ -133,6 +163,11 @@ pub async fn run(
                     break;
                 }
                 println!("\n  \x1b[38;5;220m↺\x1b[0m Outcome failed, forging repair ingots...\n");
+                events::emit_warn(
+                    "outcome.fail",
+                    "outcome validator failed, queued repair ingots",
+                    serde_json::json!({ "cycle": cycle }),
+                );
                 continue;
             }
 
@@ -146,15 +181,30 @@ pub async fn run(
                 max_cycles - 1,
                 counts.cracked
             );
+            events::emit_error(
+                "forge.retries_exhausted",
+                "max retry cycles exhausted with cracked ingots",
+                serde_json::json!({
+                    "cycle": cycle,
+                    "max_cycles": max_cycles,
+                    "cracked": counts.cracked
+                }),
+            );
             break;
         }
 
         // Analyze failures and prepare for retry
         let smith = ClaudeSmith::new(smith_config.recovery.clone());
-        let can_retry = analysis::analyze_and_prepare(&smith, smith_config, cycle).await?;
+        let can_retry =
+            analysis::analyze_and_prepare(&smith, smith_config, pipeline_config, cycle).await?;
 
         if !can_retry {
             println!("\n  \x1b[31m✗\x1b[0m No recoverable ingots, stopping");
+            events::emit_warn(
+                "analysis.stop",
+                "analysis found no recoverable ingots",
+                serde_json::json!({ "cycle": cycle }),
+            );
             break;
         }
 
@@ -169,14 +219,37 @@ pub async fn run(
     let crucible = Crucible::load(crucible_path)?;
     let counts = crucible.counts();
     if counts.cracked > 0 {
+        events::emit_error(
+            "pipeline.finish.cracked",
+            "pipeline ended with cracked ingots",
+            serde_json::json!({ "cracked": counts.cracked }),
+        );
         return Err(SlagError::ForgeFailed(counts.cracked));
     }
     if crucible.has_pending() {
+        events::emit_error(
+            "pipeline.finish.pending",
+            "pipeline ended with pending ingots",
+            serde_json::json!({
+                "ore": counts.ore,
+                "molten": counts.molten
+            }),
+        );
         return Err(SlagError::OutcomeFailed(format!(
             "pipeline ended with {} pending ingot(s)",
             counts.ore + counts.molten
         )));
     }
+
+    events::emit_info(
+        "pipeline.finish.success",
+        "pipeline run completed successfully",
+        serde_json::json!({
+            "elapsed_secs": forge_start.elapsed().as_secs(),
+            "forged": counts.forged,
+            "total": counts.total
+        }),
+    );
 
     Ok(())
 }

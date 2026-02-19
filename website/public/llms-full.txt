@@ -2,7 +2,7 @@
 
 > Smelt ideas, skim the bugs, forge the product.
 
-A task orchestrator for AI-powered development. Give it a product requirement, and it breaks it into verifiable tasks, executes them via Claude, and proves each one passed before moving on.
+A task orchestrator for AI-powered development. Give it a product requirement, and it breaks it into verifiable tasks, executes them via a configured smith CLI, and proves each one passed before moving on.
 
 ---
 
@@ -39,7 +39,7 @@ cargo install --git https://github.com/sliday/slag
 ```
 
 ### Requirements
-- Claude CLI (`claude` command in PATH)
+- One supported smith CLI in PATH (`claude`, `kimi`, `codex`, `gemini`, or `opencode`)
 - Optional: Playwright (for `:skill web` ingots)
 
 ---
@@ -88,8 +88,11 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--ci-only` | off | Run CI checks but skip AI review |
 | `--review-all` | off | Review even if CI fails |
 | `--retry N` | 3 | Max retry cycles when ingots crack (0 = no retry) |
-| `--verbose` | off | Show detailed forge output (commands, retries, extended previews) |
+| `--verbose` (`--debug`) | off | Show detailed forge output (commands, retries, extended previews, and stall heartbeats) |
 | `--no-outcome` | off | Disable independent outcome-validation closing loop |
+| `--prompt-policy MODE` | `ask` | Operator prompt behavior: `ask`, `auto-requeue`, `auto-crack`, `auto-abort` |
+| `--prompt-timeout-secs N` | 45 | Prompt timeout before default action |
+| `--log-format FORMAT` | `text` | Output renderer format: `text` or `json` |
 
 Output mode: compact by default for readability. Use `--verbose` for full per-heat details and longer Surveyor/Founder previews.
 
@@ -123,7 +126,7 @@ PRD.md → SURVEYOR → FOUNDER → FORGE (branches) → REVIEW → OUTCOME → 
 
 ### Phase 1: Surveyor
 
-Reads `PRD.md` and produces `BLUEPRINT.md` -- architecture decisions, dependency graph, risk assessment, and forging sequence. Uses Claude's plan mode.
+Reads `PRD.md` and produces `BLUEPRINT.md` -- architecture decisions, dependency graph, risk assessment, and forging sequence. Uses the configured smith in plan mode.
 
 **Input:** PRD.md (ore)
 **Output:** BLUEPRINT.md (analysis)
@@ -148,8 +151,8 @@ Parser extraction also handles multiline/wrapped `(ingot ...)` expressions from 
 The main loop. For each ingot:
 
 1. **Pick** the next ore-status ingot
-2. **Strike** -- invoke Claude with the task, context, and skill tools
-3. **Run** -- extract and execute shell commands from Claude's output
+2. **Strike** -- invoke the configured smith with the task, context, and skill tools
+3. **Run** -- extract and execute shell commands from smith output
 4. **Proof** -- run the `:proof` command; exit 0 = forged, non-zero = retry
 
 Independent ingots (`:solo t`) run on parallel anvils. Sequential ingots (`:solo nil`) run one at a time.
@@ -260,7 +263,7 @@ slag uses metallurgical vocabulary.
 | **Crucible** | The file holding all ingots | `PLAN.md` |
 | **Blueprint** | Architecture analysis and forging plan | `BLUEPRINT.md` |
 | **Anvil** | A parallel execution slot (background process) | In-memory |
-| **Smith** | The AI agent that does the work (Claude) | Claude CLI invocation |
+| **Smith** | The AI agent that does the work (configured smith CLI) | CLI invocation |
 | **Slag heap** | Debug logs dumped during forging | `logs/` directory |
 | **Heat** | One attempt at forging an ingot (retry count) | `:heat` field |
 | **Grade** | Complexity rating (1-5); high grade = plan mode | `:grade` field |
@@ -275,7 +278,7 @@ slag uses metallurgical vocabulary.
 | **Survey** | Analyze requirements, produce blueprint | Phase 1 |
 | **Found** | Design and cast ingots from blueprint | Phase 2 |
 | **Forge** | Execute an ingot: strike, run commands, verify | Phase 3 |
-| **Strike** | Send work to the smith (Claude) and get output | Phase 3 |
+| **Strike** | Send work to the smith and get output | Phase 3 |
 | **Smelt** | Process raw ore into workable material | Phase 3 |
 | **Re-smelt** | Analyze a cracked ingot and rewrite/split it | Phase 3 (recovery) |
 | **Reconsider** | Rethink a twice-cracked ingot's fundamental approach | Phase 3 (recovery) |
@@ -305,7 +308,7 @@ slag uses metallurgical vocabulary.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Base smith command |
+| `SLAG_SMITH` | auto-detected (`kimi`/`codex`/`gemini`/`opencode`/`claude`) | Base smith command |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
@@ -319,6 +322,12 @@ slag uses metallurgical vocabulary.
 | `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each outcome validator/recast response before fallback fail path |
 | `SLAG_SUBAGENT_TIMEOUT_SECS` | `90` | Max seconds for each subagent fallback invocation |
 | `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
+| `SLAG_PROMPT_POLICY` | `ask` | Default prompt behavior (`ask`, `auto-requeue`, `auto-crack`, `auto-abort`) |
+| `SLAG_PROMPT_TIMEOUT_SECS` | `45` | Prompt timeout before default action |
+| `SLAG_LOG_FORMAT` | `text` | Log renderer format (`text`, `json`) |
+| `SLAG_PROMPT_REPEAT_MODE` | `non-plan` | Prompt repetition mode (`off`, `non-plan`, `always`) |
+| `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
+| `SLAG_PROMPT_REPEAT_MAX_CHARS` | `12000` | Skip repetition when prompt exceeds this size |
 
 ### Smith Selection
 
@@ -401,4 +410,4 @@ Only the specific ingot is affected; other anvils continue undisturbed.
 
 ## Warning
 
-slag gives Claude autonomous shell access. It will create files, install packages, and run commands without asking. Use in a dedicated directory or container.
+slag gives the configured smith autonomous shell access. It will create files, install packages, and run commands without asking. Use in a dedicated directory or container.

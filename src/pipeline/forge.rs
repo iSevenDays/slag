@@ -1,13 +1,15 @@
 use std::collections::HashMap;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::anvil::worktree;
-use crate::config::{PipelineConfig, SmithConfig, CRUCIBLE, LEDGER};
+use crate::config::{PipelineConfig, PromptPolicy, SmithConfig, CRUCIBLE, LEDGER};
 use crate::crucible::Crucible;
 use crate::error::SlagError;
+use crate::events;
 use crate::flux;
+use crate::prompt;
 use crate::proof;
 use crate::sexp::{Ingot, Status};
 use crate::smith::claude::ClaudeSmith;
@@ -245,7 +247,15 @@ pub async fn run(
                 }
 
                 let estimate = estimate_reforge_secs(stale_ids.len(), pipeline_config.max_anvils);
-                match choose_stale_molten_action(&stale_ids, estimate, pipeline_config.verbose)? {
+                match choose_stale_molten_action(
+                    &stale_ids,
+                    estimate,
+                    pipeline_config.verbose,
+                    pipeline_config.prompt_policy,
+                    pipeline_config.prompt_timeout_secs,
+                )
+                .await?
+                {
                     StaleMoltenAction::Requeue => {
                         let recovered = recover_stale_molten_to_ore(&mut crucible);
                         if pipeline_config.verbose {
@@ -280,8 +290,15 @@ pub async fn run(
                         );
                     }
                     StaleMoltenAction::Abort => {
-                        return Err(SlagError::OutcomeFailed(
-                            "aborted by user due to stale molten ingot state".into(),
+                        events::emit_warn(
+                            "forge.stale_molten.abort",
+                            "operator chose abort during stale molten recovery",
+                            serde_json::json!({
+                                "stale_count": stale_ids.len()
+                            }),
+                        );
+                        return Err(SlagError::StateRecoveryAbort(
+                            "aborted due to stale molten ingot state".into(),
                         ));
                     }
                 }
@@ -292,6 +309,12 @@ pub async fn run(
 
         crucible.set_status(&ingot.id, Status::Molten);
         crucible.save()?;
+        let in_fire = crucible.counts().molten;
+        tui::status_line(
+            "🔥",
+            tui::HOT,
+            &format!("forging [{}] (in fire: {in_fire})", ingot.id),
+        );
 
         let smith_cmd = config.select(ingot.skill.as_str(), ingot.grade).to_string();
         let smith = ClaudeSmith::new(smith_cmd);
@@ -366,12 +389,55 @@ fn stale_molten_ids(crucible: &Crucible) -> Vec<String> {
         .collect()
 }
 
-fn choose_stale_molten_action(
+async fn choose_stale_molten_action(
     stale_ids: &[String],
     estimate_secs: Option<u64>,
     verbose: bool,
+    policy: PromptPolicy,
+    timeout_secs: u64,
 ) -> Result<StaleMoltenAction, SlagError> {
-    if !io::stdin().is_terminal() {
+    match policy {
+        PromptPolicy::AutoRequeue => {
+            events::emit_info(
+                "prompt.stale_molten.auto_requeue",
+                "applied prompt policy auto-requeue",
+                serde_json::json!({
+                    "stale_count": stale_ids.len()
+                }),
+            );
+            return Ok(StaleMoltenAction::Requeue);
+        }
+        PromptPolicy::AutoCrack => {
+            events::emit_info(
+                "prompt.stale_molten.auto_crack",
+                "applied prompt policy auto-crack",
+                serde_json::json!({
+                    "stale_count": stale_ids.len()
+                }),
+            );
+            return Ok(StaleMoltenAction::Crack);
+        }
+        PromptPolicy::AutoAbort => {
+            events::emit_warn(
+                "prompt.stale_molten.auto_abort",
+                "applied prompt policy auto-abort",
+                serde_json::json!({
+                    "stale_count": stale_ids.len()
+                }),
+            );
+            return Ok(StaleMoltenAction::Abort);
+        }
+        PromptPolicy::Ask => {}
+    }
+
+    if !prompt::stdin_is_interactive() {
+        events::emit_debug(
+            "prompt.stale_molten.non_interactive",
+            "stdin is not interactive, defaulting to requeue",
+            serde_json::json!({
+                "stale_count": stale_ids.len()
+            }),
+        );
         return Ok(StaleMoltenAction::Requeue);
     }
 
@@ -399,10 +465,25 @@ fn choose_stale_molten_action(
     print!("  \x1b[38;5;220m?\x1b[0m Choose action [R]equeue (default) / [C]rack / [A]bort: ");
     let _ = io::stdout().flush();
 
-    let mut input = String::new();
-    if io::stdin().read_line(&mut input).is_err() {
+    let Some(input) = prompt::read_line_timeout(timeout_secs) else {
+        events::emit_warn(
+            "prompt.stale_molten.timeout",
+            "operator prompt timed out, defaulted to requeue",
+            serde_json::json!({
+                "timeout_secs": timeout_secs,
+                "stale_count": stale_ids.len()
+            }),
+        );
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            &format!(
+                "No operator input after {}s, defaulting to requeue",
+                timeout_secs
+            ),
+        );
         return Ok(StaleMoltenAction::Requeue);
-    }
+    };
 
     let choice = input.trim().to_ascii_lowercase();
     let action = match choice.as_str() {
@@ -410,6 +491,15 @@ fn choose_stale_molten_action(
         "a" | "abort" => StaleMoltenAction::Abort,
         _ => StaleMoltenAction::Requeue,
     };
+    events::emit_info(
+        "prompt.stale_molten.choice",
+        "operator selected stale molten action",
+        serde_json::json!({
+            "choice": choice,
+            "resolved_action": format!("{:?}", action),
+            "stale_count": stale_ids.len()
+        }),
+    );
     Ok(action)
 }
 

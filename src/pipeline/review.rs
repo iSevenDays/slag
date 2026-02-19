@@ -1,10 +1,13 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::config::{PipelineConfig, CRUCIBLE};
 use crate::crucible::Crucible;
 use crate::error::SlagError;
+use crate::events;
 use crate::flux;
-use crate::sexp::Status;
+use crate::sexp::parser::parse_ingot;
+use crate::sexp::{Ingot, Status};
 use crate::smith::Smith;
 use crate::tui;
 
@@ -41,12 +44,51 @@ pub struct ReviewResult {
     pub comments: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewerLane {
+    Build,
+    Behavior,
+    Risk,
+}
+
+impl ReviewerLane {
+    fn all() -> [Self; 3] {
+        [Self::Build, Self::Behavior, Self::Risk]
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Build => "build",
+            Self::Behavior => "behavior",
+            Self::Risk => "risk",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LaneReviewResult {
+    lane: ReviewerLane,
+    passed: bool,
+    schema_valid: bool,
+    evidence: String,
+    fix_ingots: Vec<Ingot>,
+}
+
 /// Phase 3.5: Review — master agent quality gate
 pub async fn run(
     smith: &dyn Smith,
     config: &PipelineConfig,
     forged_results: &[ForgeResult],
 ) -> Result<(), SlagError> {
+    events::emit_info(
+        "review.start",
+        "starting review phase",
+        serde_json::json!({
+            "forged_results": forged_results.len(),
+            "ci_only": config.ci_only,
+            "review_all": config.review_all
+        }),
+    );
     tui::header("REVIEW · master agent quality gate");
 
     let branches: Vec<&ForgeResult> = forged_results
@@ -108,23 +150,53 @@ pub async fn run(
         // Get diff for AI review
         let diff = get_branch_diff(branch).await;
 
-        // Master agent review
-        let spinner = tui::spinner("reviewing...");
-        let review = master_review(smith, &forge_result.id, branch, &diff, &ci_result).await;
+        let spinner = tui::spinner("reviewing lanes...");
+        let lane_results =
+            run_reviewer_lanes(smith, &forge_result.id, branch, &diff, &ci_result).await;
         spinner.finish_and_clear();
 
-        match review {
-            Ok(result) => {
-                if result.approved {
-                    println!("    \x1b[1;37m█\x1b[0m approved");
-                    if !result.comments.is_empty() {
-                        println!("    \x1b[90m{}\x1b[0m", tui::truncate(&result.comments, 60));
-                    }
+        match lane_results {
+            Ok(results) => {
+                let failed: Vec<&LaneReviewResult> = results.iter().filter(|r| !r.passed).collect();
+                if failed.is_empty() {
+                    println!("    \x1b[1;37m█\x1b[0m approved (3 lanes)");
+                    events::emit_info(
+                        "review.approved",
+                        "all reviewer lanes passed",
+                        serde_json::json!({
+                            "ingot_id": forge_result.id,
+                            "branch": branch
+                        }),
+                    );
                     merge_branch(&forge_result.id).await?;
                     approved_count += 1;
                 } else {
-                    println!("    \x1b[31m✗\x1b[0m rejected");
-                    println!("    \x1b[90m{}\x1b[0m", tui::truncate(&result.comments, 60));
+                    println!("    \x1b[31m✗\x1b[0m rejected by {} lane(s)", failed.len());
+                    for result in &failed {
+                        println!(
+                            "    \x1b[90m↳ {}: {}\x1b[0m",
+                            result.lane.as_str(),
+                            tui::truncate(&result.evidence, 80)
+                        );
+                    }
+
+                    let queued = queue_lane_fix_ingots(&forge_result.id, &results)?;
+                    if queued > 0 {
+                        println!(
+                            "    \x1b[38;5;220m↺\x1b[0m queued {} reviewer fix ingot(s)",
+                            queued
+                        );
+                    }
+                    events::emit_warn(
+                        "review.rejected",
+                        "one or more reviewer lanes rejected branch",
+                        serde_json::json!({
+                            "ingot_id": forge_result.id,
+                            "branch": branch,
+                            "failed_lanes": failed.iter().map(|r| r.lane.as_str()).collect::<Vec<_>>(),
+                            "queued_fix_ingots": queued,
+                        }),
+                    );
                     rejected_count += 1;
                     mark_ingot_cracked(&forge_result.id)?;
                     cleanup_branch(&forge_result.id, config.keep_branches).await;
@@ -132,6 +204,15 @@ pub async fn run(
             }
             Err(e) => {
                 eprintln!("    \x1b[31m✗\x1b[0m review error: {e}");
+                events::emit_error(
+                    "review.error",
+                    "review lane execution failed",
+                    serde_json::json!({
+                        "ingot_id": forge_result.id,
+                        "branch": branch,
+                        "error": e.to_string()
+                    }),
+                );
                 rejected_count += 1;
                 mark_ingot_cracked(&forge_result.id)?;
                 cleanup_branch(&forge_result.id, config.keep_branches).await;
@@ -262,6 +343,105 @@ async fn get_branch_diff(branch: &str) -> String {
     }
 }
 
+async fn run_reviewer_lanes(
+    smith: &dyn Smith,
+    ingot_id: &str,
+    branch: &str,
+    diff: &str,
+    ci_result: &CiResult,
+) -> Result<Vec<LaneReviewResult>, SlagError> {
+    let mut results = Vec::new();
+    for lane in ReviewerLane::all() {
+        let prompt =
+            flux::prepare_reviewer_lane_flux(lane.as_str(), ingot_id, branch, diff, ci_result);
+        let response = smith.invoke(&prompt).await?;
+        let parsed = parse_lane_review_response(lane, &response);
+        events::emit_info(
+            "review.lane.result",
+            "review lane completed",
+            serde_json::json!({
+                "ingot_id": ingot_id,
+                "branch": branch,
+                "lane": lane.as_str(),
+                "passed": parsed.passed,
+                "schema_valid": parsed.schema_valid,
+                "fix_ingots": parsed.fix_ingots.len()
+            }),
+        );
+        results.push(parsed);
+    }
+    Ok(results)
+}
+
+fn parse_lane_review_response(lane: ReviewerLane, raw: &str) -> LaneReviewResult {
+    let mut status: Option<bool> = None;
+    let mut evidence = String::new();
+    let mut fix_declared_present = false;
+    let mut fix_declared_none = false;
+    let mut fix_ingots = Vec::new();
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("STATUS:") {
+            let token = rest.trim().to_ascii_uppercase();
+            status = match token.as_str() {
+                "PASS" => Some(true),
+                "FAIL" => Some(false),
+                _ => None,
+            };
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("EVIDENCE:") {
+            evidence = rest.trim().to_string();
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("FIX_INGOTS:") {
+            let token = rest.trim().to_ascii_uppercase();
+            fix_declared_present = token == "PRESENT";
+            fix_declared_none = token == "NONE";
+            continue;
+        }
+        if trimmed.starts_with("(ingot ") {
+            if let Some(ingot) = parse_ingot(trimmed) {
+                fix_ingots.push(ingot);
+            }
+        }
+    }
+
+    let mut schema_valid = status.is_some() && !evidence.is_empty();
+    let mut passed = status.unwrap_or(false);
+
+    if passed && fix_declared_present {
+        schema_valid = false;
+        passed = false;
+    }
+    if passed && !fix_ingots.is_empty() {
+        schema_valid = false;
+        passed = false;
+    }
+    if !passed && fix_declared_none {
+        schema_valid = false;
+    }
+    if !passed && fix_declared_present && fix_ingots.is_empty() {
+        schema_valid = false;
+    }
+
+    if !schema_valid && evidence.is_empty() {
+        evidence = "review lane output did not satisfy required schema".to_string();
+    }
+    if !schema_valid {
+        passed = false;
+    }
+
+    LaneReviewResult {
+        lane,
+        passed,
+        schema_valid,
+        evidence,
+        fix_ingots,
+    }
+}
+
 /// Master agent review via Smith
 async fn master_review(
     smith: &dyn Smith,
@@ -326,6 +506,78 @@ fn mark_ingot_cracked(id: &str) -> Result<(), SlagError> {
     crucible.set_status(id, Status::Cracked);
     crucible.save()?;
     Ok(())
+}
+
+fn queue_lane_fix_ingots(id: &str, lane_results: &[LaneReviewResult]) -> Result<usize, SlagError> {
+    let mut pending: Vec<(ReviewerLane, Ingot)> = Vec::new();
+    for result in lane_results.iter().filter(|r| !r.passed) {
+        for ingot in &result.fix_ingots {
+            pending.push((result.lane, ingot.clone()));
+        }
+    }
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
+    let mut existing_ids: HashSet<String> = crucible.ingots.iter().map(|i| i.id.clone()).collect();
+    let mut queued = 0usize;
+
+    for (idx, (lane, mut ingot)) in pending.into_iter().enumerate() {
+        if queued >= 8 {
+            break;
+        }
+        if !is_concrete_review_ingot(&ingot) {
+            continue;
+        }
+
+        ingot.status = Status::Ore;
+        ingot.heat = 0;
+        ingot.smelt = 0;
+        ingot.solo = false;
+
+        let base_id = format!("rv_{}_{}_{}", id, lane.as_str(), idx + 1);
+        ingot.id = unique_id(base_id, &mut existing_ids);
+        crucible.ingots.push(ingot);
+        queued += 1;
+    }
+
+    if queued > 0 {
+        crucible.save()?;
+    }
+    Ok(queued)
+}
+
+fn is_concrete_review_ingot(ingot: &Ingot) -> bool {
+    let proof = ingot.proof.trim().to_ascii_lowercase();
+    let work = ingot.work.trim().to_ascii_lowercase();
+    if proof.is_empty() || work.is_empty() {
+        return false;
+    }
+    if matches!(
+        proof.as_str(),
+        "true" | "shell" | "proof" | "cmd" | "command"
+    ) {
+        return false;
+    }
+    if matches!(work.as_str(), "task" | "todo" | "fix task") {
+        return false;
+    }
+    true
+}
+
+fn unique_id(base: String, existing: &mut HashSet<String>) -> String {
+    if existing.insert(base.clone()) {
+        return base;
+    }
+    let mut n = 2usize;
+    loop {
+        let candidate = format!("{base}_{n}");
+        if existing.insert(candidate.clone()) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 /// Print CI failure details
