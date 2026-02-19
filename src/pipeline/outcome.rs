@@ -499,8 +499,7 @@ fn stop_timeout_spinner(spinner: &indicatif::ProgressBar, task: tokio::task::Joi
 }
 
 fn subagent_command() -> String {
-    std::env::var("SLAG_SMITH_SUBAGENT")
-        .unwrap_or_else(|_| "npx -y @anthropic-ai/claude-code -p".to_string())
+    crate::config::subagent_smith_command_from_env()
 }
 
 fn subagent_timeout_secs() -> u64 {

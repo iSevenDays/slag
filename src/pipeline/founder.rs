@@ -227,8 +227,7 @@ fn founder_confidence(raw: &str, ingots: &[Ingot], format_retries: usize) -> f32
 }
 
 fn subagent_command() -> String {
-    std::env::var("SLAG_SMITH_SUBAGENT")
-        .unwrap_or_else(|_| "npx -y @anthropic-ai/claude-code -p".to_string())
+    crate::config::subagent_smith_command_from_env()
 }
 
 fn subagent_timeout_secs() -> u64 {

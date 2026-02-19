@@ -114,7 +114,7 @@ If validator output is malformed (for example prose without `TEST:`), slag recas
 For web/simulation outcomes, outcome TEST commands must be headless and emit a screenshot to `$SLAG_OUTCOME_SCREENSHOT` (default `logs/outcome-smoke.png`).
 For uncertain web outcomes, slag can force deterministic validation via `scripts/outcome_web_smoke.js` (page loads, runtime metric > 0, zero console errors, screenshot artifact).
 Founder/outcome confidence is scored; thresholds come from `SLAG_CONFIDENCE_THRESHOLD` or phase overrides (`SLAG_FOUNDER_CONFIDENCE_THRESHOLD`, `SLAG_OUTCOME_CONFIDENCE_THRESHOLD`).
-Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default `npx -y @anthropic-ai/claude-code -p`, timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
+Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `kimi`, `codex`, `gemini`, `opencode`, then `claude`; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
 
 ### 5. ASSAY
 Final quality report. Shows forged/cracked counts, temperature bar, and identifies any cracked ingots. Exits 0 on full forge, 1 if any ingot cracked.

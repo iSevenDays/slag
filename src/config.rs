@@ -40,7 +40,7 @@ pub struct SmithConfig {
 
 impl SmithConfig {
     pub fn from_env() -> Self {
-        let base = parse_non_empty_env("SLAG_SMITH").unwrap_or_else(default_smith_command);
+        let base = smith_command_from_env("SLAG_SMITH");
         let plan = format!("{base} --permission-mode plan");
         let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
         let web_plan = format!("{web} --permission-mode plan");
@@ -102,8 +102,17 @@ fn parse_non_empty_env(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn smith_command_from_env(name: &str) -> String {
+    parse_non_empty_env(name).unwrap_or_else(default_smith_command)
+}
+
 fn default_smith_command() -> String {
     auto_detect_smith_command().unwrap_or_else(|| CLAUDE_SMITH_DEFAULT.to_string())
+}
+
+/// Resolve subagent smith command from env with auto-detect fallback.
+pub fn subagent_smith_command_from_env() -> String {
+    smith_command_from_env("SLAG_SMITH_SUBAGENT")
 }
 
 fn auto_detect_smith_command() -> Option<String> {
