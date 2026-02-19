@@ -4,11 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.21
+## What's new in v1.3.22
 
-- Kimi mode auto-fix: auto-detect now checks `kimi --help` and picks Claude-compatible mode when available.
-- Fewer protocol mismatches: avoids defaulting to native `--print --prompt` wrapper on Claude-style `kimi` binaries.
-- More guardrail coverage: added tests for Kimi compatibility detection and smith selection paths.
+- Safer smith routing: prefers Claude-compatible `kimi`, then `codex`/`gemini`/`opencode`/`claude`, with native `kimi` only as last fallback.
+- Legacy wrapper auto-fix: if any `SLAG_SMITH*` env override still uses `kimi --print --prompt`, slag now upgrades it automatically when Claude-compatible `kimi` is available.
+- More tests and clearer docs: added routing/normalization test coverage and aligned README + website behavior docs.
 
 ## Install
 
@@ -159,7 +159,7 @@ Run `slag update` to self-update to the latest release. This downloads the new b
 The Rust binary is faster, has better error handling, and includes self-update. The bash script is a single file with no build step — useful if you can't install Rust or want to inspect/modify the orchestrator directly.
 
 ### Do I need Claude CLI installed?
-Not for the Rust binary. It auto-detects the first available supported smith CLI (`kimi`, `codex`, `gemini`, `opencode`, then `claude`) unless you set `SLAG_SMITH` explicitly. The legacy bash script still expects Claude CLI.
+Not for the Rust binary. It auto-detects the first compatible smith CLI (`kimi` Claude-compatible, then `codex`, `gemini`, `opencode`, `claude`, with native `kimi` as fallback) unless you set `SLAG_SMITH` explicitly. The legacy bash script still expects Claude CLI.
 
 ## Ingot S-Expression Format
 

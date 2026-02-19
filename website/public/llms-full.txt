@@ -308,14 +308,14 @@ slag uses metallurgical vocabulary.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SLAG_SMITH` | auto-detected (`kimi`/`codex`/`gemini`/`opencode`/`claude`) | Base smith command |
+| `SLAG_SMITH` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Base smith command |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
 | `SLAG_SMITH_RECOVERY` | `SLAG_SMITH` | Override model/flags for analysis/re-smelt/reconsider phases |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator command (non-interactive by default; override for a specific model/profile) |
 | `SLAG_SMITH_INDEPENDENT` | unset (disabled) | Optional independent fallback smith for re-smelt/reconsider escalation after rejected primary recovery output |
-| `SLAG_SMITH_SUBAGENT` | auto-detected (`kimi`/`codex`/`gemini`/`opencode`/`claude`) | Optional uncertainty fallback smith (used only for low-confidence founder/outcome cases) |
+| `SLAG_SMITH_SUBAGENT` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Optional uncertainty fallback smith (used only for low-confidence founder/outcome cases) |
 | `SLAG_CONFIDENCE_THRESHOLD` | `0.65` | Global default confidence threshold for founder/outcome escalation |
 | `SLAG_FOUNDER_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Founder-specific confidence threshold |
 | `SLAG_OUTCOME_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Outcome-specific confidence threshold |

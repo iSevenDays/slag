@@ -45,14 +45,15 @@ impl SmithConfig {
         let plan = format!("{base} --permission-mode plan");
         let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
         let web_plan = format!("{web} --permission-mode plan");
-        let surveyor = std::env::var("SLAG_SMITH_SURVEYOR").unwrap_or_else(|_| plan.clone());
-        let founder = std::env::var("SLAG_SMITH_FOUNDER").unwrap_or_else(|_| base.clone());
-        let review = std::env::var("SLAG_SMITH_REVIEW").unwrap_or_else(|_| base.clone());
-        let recovery = std::env::var("SLAG_SMITH_RECOVERY").unwrap_or_else(|_| base.clone());
-        let independent = parse_non_empty_env("SLAG_SMITH_INDEPENDENT");
+        let surveyor = smith_command_override_or("SLAG_SMITH_SURVEYOR", plan.clone());
+        let founder = smith_command_override_or("SLAG_SMITH_FOUNDER", base.clone());
+        let review = smith_command_override_or("SLAG_SMITH_REVIEW", base.clone());
+        let recovery = smith_command_override_or("SLAG_SMITH_RECOVERY", base.clone());
+        let independent =
+            parse_non_empty_env("SLAG_SMITH_INDEPENDENT").map(normalize_smith_command);
         // Outcome validation should be non-interactive and deterministic by default.
         // Use plan mode unless explicitly overridden by SLAG_SMITH_OUTCOME.
-        let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| plan.clone());
+        let outcome = smith_command_override_or("SLAG_SMITH_OUTCOME", plan.clone());
         let confidence_threshold = parse_confidence("SLAG_CONFIDENCE_THRESHOLD", 0.65);
         let founder_confidence_threshold =
             parse_confidence("SLAG_FOUNDER_CONFIDENCE_THRESHOLD", confidence_threshold);
@@ -104,7 +105,15 @@ fn parse_non_empty_env(name: &str) -> Option<String> {
 }
 
 fn smith_command_from_env(name: &str) -> String {
-    parse_non_empty_env(name).unwrap_or_else(default_smith_command)
+    parse_non_empty_env(name)
+        .map(normalize_smith_command)
+        .unwrap_or_else(default_smith_command)
+}
+
+fn smith_command_override_or(name: &str, fallback: String) -> String {
+    parse_non_empty_env(name)
+        .map(normalize_smith_command)
+        .unwrap_or(fallback)
 }
 
 fn default_smith_command() -> String {
@@ -133,6 +142,30 @@ fn auto_detect_smith_command() -> Option<String> {
     )
 }
 
+fn normalize_smith_command(command: String) -> String {
+    let kimi_claude_compat = resolve_command_path("kimi")
+        .as_deref()
+        .map(is_claude_compatible_kimi_cli)
+        .unwrap_or(false);
+    normalize_smith_command_with_detection(&command, kimi_claude_compat)
+}
+
+fn normalize_smith_command_with_detection(command: &str, kimi_claude_compat: bool) -> String {
+    if looks_like_legacy_kimi_wrapper(command) && kimi_claude_compat {
+        KIMI_CLAUDE_WRAPPER.to_string()
+    } else {
+        command.to_string()
+    }
+}
+
+fn looks_like_legacy_kimi_wrapper(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    lower.contains("kimi")
+        && lower.contains("--print")
+        && lower.contains("--prompt")
+        && lower.contains("--output-format")
+}
+
 fn choose_detected_smith<F>(
     mut has_cmd: F,
     kimi_native: bool,
@@ -141,13 +174,9 @@ fn choose_detected_smith<F>(
 where
     F: FnMut(&str) -> bool,
 {
-    if has_cmd("kimi") {
-        let cmd = if kimi_native && !kimi_claude_compat {
-            KIMI_NATIVE_WRAPPER
-        } else {
-            KIMI_CLAUDE_WRAPPER
-        };
-        return Some(cmd.to_string());
+    let has_kimi = has_cmd("kimi");
+    if has_kimi && kimi_claude_compat {
+        return Some(KIMI_CLAUDE_WRAPPER.to_string());
     }
     if has_cmd("codex") {
         return Some(CODEX_WRAPPER.to_string());
@@ -160,6 +189,14 @@ where
     }
     if has_cmd("claude") {
         return Some(CLAUDE_SMITH_DEFAULT.to_string());
+    }
+    if has_kimi {
+        let cmd = if kimi_native && !kimi_claude_compat {
+            KIMI_NATIVE_WRAPPER
+        } else {
+            KIMI_CLAUDE_WRAPPER
+        };
+        return Some(cmd.to_string());
     }
     None
 }
@@ -334,15 +371,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detected_smith_prefers_native_kimi_first() {
+    fn detected_smith_prefers_claude_over_native_kimi() {
         let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", true, false);
-        assert_eq!(selected, Some(KIMI_NATIVE_WRAPPER.to_string()));
+        assert_eq!(selected, Some(CLAUDE_SMITH_DEFAULT.to_string()));
     }
 
     #[test]
     fn detected_smith_prefers_kimi_claude_wrapper_when_non_native() {
         let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", false, true);
         assert_eq!(selected, Some(KIMI_CLAUDE_WRAPPER.to_string()));
+    }
+
+    #[test]
+    fn detected_smith_uses_native_kimi_when_only_option() {
+        let selected = choose_detected_smith(|cmd| cmd == "kimi", true, false);
+        assert_eq!(selected, Some(KIMI_NATIVE_WRAPPER.to_string()));
     }
 
     #[test]
@@ -367,6 +410,24 @@ mod tests {
     fn detected_smith_uses_claude_wrapper_for_claude_compatible_kimi() {
         let selected = choose_detected_smith(|cmd| cmd == "kimi", true, true);
         assert_eq!(selected, Some(KIMI_CLAUDE_WRAPPER.to_string()));
+    }
+
+    #[test]
+    fn normalize_legacy_kimi_wrapper_to_claude_compat() {
+        let normalized = normalize_smith_command_with_detection(KIMI_NATIVE_WRAPPER, true);
+        assert_eq!(normalized, KIMI_CLAUDE_WRAPPER);
+    }
+
+    #[test]
+    fn keep_legacy_kimi_wrapper_when_non_compatible() {
+        let normalized = normalize_smith_command_with_detection(KIMI_NATIVE_WRAPPER, false);
+        assert_eq!(normalized, KIMI_NATIVE_WRAPPER);
+    }
+
+    #[test]
+    fn leaves_other_commands_unchanged() {
+        let normalized = normalize_smith_command_with_detection("codex -a never exec -", true);
+        assert_eq!(normalized, "codex -a never exec -");
     }
 
     #[test]

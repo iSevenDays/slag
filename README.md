@@ -8,11 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.21
+## What's new in v1.3.22
 
-- **Kimi mode auto-fix:** auto-detect now checks `kimi --help` and picks Claude-compatible mode when available.
-- **Fewer protocol mismatches:** avoids defaulting to native `--print --prompt` wrapper on Claude-style `kimi` binaries.
-- **More guardrail coverage:** added tests for Kimi compatibility detection and smith selection paths.
+- **Safer smith routing:** prefers Claude-compatible `kimi`, then `codex`/`gemini`/`opencode`/`claude`, with native `kimi` only as last fallback.
+- **Legacy wrapper auto-fix:** if any `SLAG_SMITH*` env override still uses `kimi --print --prompt`, slag now upgrades it automatically when Claude-compatible `kimi` is available.
+- **More tests and clearer docs:** added routing/normalization test coverage and aligned README + website behavior docs.
 
 ## Install
 
@@ -82,14 +82,14 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SLAG_SMITH` | auto-detected (`kimi`/`codex`/`gemini`/`opencode`/`claude`) | Main smith for survey/founder/forge |
+| `SLAG_SMITH` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Main smith for survey/founder/forge |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
 | `SLAG_SMITH_RECOVERY` | `SLAG_SMITH` | Override model/flags for analysis/re-smelt/reconsider phases |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
 | `SLAG_SMITH_INDEPENDENT` | unset (disabled) | Optional independent fallback smith for recovery escalation after rejected re-smelt/reconsider output |
-| `SLAG_SMITH_SUBAGENT` | auto-detected (`kimi`/`codex`/`gemini`/`opencode`/`claude`) | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
+| `SLAG_SMITH_SUBAGENT` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
 | `SLAG_CONFIDENCE_THRESHOLD` | `0.65` | Global default threshold for uncertainty escalation |
 | `SLAG_FOUNDER_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Founder-specific escalation threshold |
 | `SLAG_OUTCOME_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Outcome-specific escalation threshold |
@@ -103,8 +103,8 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
 | `SLAG_PROMPT_REPEAT_MAX_CHARS` | `12000` | Skip repetition if prompt exceeds this size |
 
-When `SLAG_SMITH` is unset, slag picks the first available smith in this order:
-`kimi` (native Kimi CLI uses print-mode wrapper), `codex`, `gemini`, `opencode`, then `claude`.
+When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
+`kimi` (Claude-compatible), `codex`, `gemini`, `opencode`, `claude`, then native `kimi` as last fallback.
 
 ## Progress display
 
