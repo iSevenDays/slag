@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::anvil::worktree;
 use crate::config::{PipelineConfig, SmithConfig, CRUCIBLE, LEDGER};
@@ -12,6 +14,8 @@ use crate::smith::Smith;
 use crate::tui;
 
 use super::resmelt;
+
+const DEFAULT_VERBOSE_HEARTBEAT_SECS: u64 = 15;
 
 /// Result of forging an ingot, including branch name if worktree mode
 #[derive(Debug, Clone)]
@@ -116,11 +120,42 @@ pub async fn run(
                 });
             }
 
+            let heartbeat_secs = verbose_heartbeat_secs();
+            let mut pending_started: HashMap<String, Instant> = solo_ids
+                .iter()
+                .map(|id| (id.clone(), Instant::now()))
+                .collect();
+            let mut last_completion = Instant::now();
+
             // Collect results and update crucible on main thread
-            while let Some(result) = set.join_next().await {
+            loop {
+                let next = if pipeline_config.verbose {
+                    match tokio::time::timeout(Duration::from_secs(heartbeat_secs), set.join_next())
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(_) => {
+                            log_parallel_heartbeat(
+                                &pending_started,
+                                last_completion,
+                                heartbeat_secs,
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    set.join_next().await
+                };
+
+                let Some(result) = next else {
+                    break;
+                };
+
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
                 match result {
                     Ok((id, Ok(forge_result))) => {
+                        pending_started.remove(&id);
+                        last_completion = Instant::now();
                         let heat_used = forge_result.heat_used;
                         let max_heat = crucible
                             .get(&id)
@@ -138,6 +173,8 @@ pub async fn run(
                         );
                     }
                     Ok((id, Err(SlagError::IngotCracked(_, heat_used)))) => {
+                        pending_started.remove(&id);
+                        last_completion = Instant::now();
                         // Try resmelt
                         if let Some(ingot) = crucible.get_mut(&id) {
                             ingot.heat = heat_used;
@@ -166,6 +203,8 @@ pub async fn run(
                         }
                     }
                     Ok((id, Err(e))) => {
+                        pending_started.remove(&id);
+                        last_completion = Instant::now();
                         eprintln!(
                             "  \x1b[31m✗\x1b[0m [{}] forge infrastructure error: {e}",
                             id
@@ -174,6 +213,7 @@ pub async fn run(
                         crucible.save()?;
                     }
                     Err(e) => {
+                        last_completion = Instant::now();
                         eprintln!("  \x1b[31m✗\x1b[0m anvil panicked: {e}");
                     }
                 }
@@ -492,6 +532,42 @@ fn refresh_ingot_from_crucible(ingot: &mut Ingot) {
             ingot.extra = latest.extra.clone();
         }
     }
+}
+
+fn verbose_heartbeat_secs() -> u64 {
+    std::env::var("SLAG_VERBOSE_HEARTBEAT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_VERBOSE_HEARTBEAT_SECS)
+}
+
+fn log_parallel_heartbeat(
+    pending_started: &HashMap<String, Instant>,
+    last_completion: Instant,
+    heartbeat_secs: u64,
+) {
+    let mut active: Vec<String> = pending_started
+        .iter()
+        .map(|(id, started)| format!("{id}:{}", tui::format_elapsed(started.elapsed().as_secs())))
+        .collect();
+    active.sort();
+    let active_text = if active.is_empty() {
+        "unknown".to_string()
+    } else {
+        active.join(", ")
+    };
+
+    tui::status_line(
+        "…",
+        tui::COLD,
+        &format!(
+            "verbose heartbeat ({}): no completions for {}; active anvils: {}",
+            tui::format_elapsed(heartbeat_secs),
+            tui::format_elapsed(last_completion.elapsed().as_secs()),
+            active_text
+        ),
+    );
 }
 
 /// Invoke smith in a specific directory (worktree)

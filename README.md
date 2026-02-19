@@ -72,7 +72,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--ci-only` | off | Run CI checks but skip AI review |
 | `--review-all` | off | Review even if CI fails |
 | `--retry N` | 3 | Max retry cycles when ingots crack (0 = no retry) |
-| `--verbose` | off | Show detailed forge output (commands, retries, extended previews) |
+| `--verbose` (`--debug`) | off | Show detailed forge output (commands, retries, extended previews, and stall heartbeats) |
 | `--no-outcome` | off | Disable independent outcome-validation closing loop |
 
 **Model routing (env):**
@@ -115,6 +115,7 @@ slag shows emoji progress in the terminal:
 The percentage shows overall progress: forged ingots / total ingots.
 
 By default, forge output is compact and optimized for readability. Use `--verbose` for full per-heat details and longer previews during Surveyor/Founder phases.
+Set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to control verbose heartbeat cadence for long-running anvils.
 
 ## Language
 

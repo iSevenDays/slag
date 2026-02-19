@@ -43,8 +43,8 @@ pub struct Cli {
     #[arg(long, default_value_t = 3)]
     pub retry: usize,
 
-    /// Show detailed forge output (commands, retries, and extra previews)
-    #[arg(long)]
+    /// Show detailed forge output (commands, retries, previews, and stall heartbeats)
+    #[arg(long, visible_alias = "debug")]
     pub verbose: bool,
 
     /// Disable independent outcome-validation closing loop

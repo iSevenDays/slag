@@ -103,7 +103,8 @@ Multiline/wrapped `(ingot ...)` expressions are now parsed from mixed output to 
 ### 3. FORGE
 Strikes each ingot via the configured smith. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.
 
-Default forge output is compact for readability. Use `--verbose` for detailed per-heat logs and longer Surveyor/Founder previews.
+Default forge output is compact for readability. Use `--verbose` (or `--debug`) for detailed per-heat logs, longer Surveyor/Founder previews, and periodic stall heartbeats.
+Set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to control verbose heartbeat cadence for long-running anvils.
 
 ### 4. OUTCOME
 Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.
