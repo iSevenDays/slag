@@ -8,11 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.14
+## What's new in v1.3.15
 
-- **Subagent now auto-detects too:** `SLAG_SMITH_SUBAGENT` now uses the same default smith detection as `SLAG_SMITH` (`kimi` → `codex` → `gemini` → `opencode` → `claude`) when unset.
-- **Less config drift:** founder and outcome now share one subagent command resolver, so both phases follow the same fallback behavior.
-- **Docs synced:** README and website now reflect the new subagent default.
+- **Better stall visibility:** `--verbose` now emits periodic forge heartbeats when parallel anvils are still running, including active ingot IDs and elapsed durations.
+- **New debug alias:** use `--debug` as an alias for `--verbose`.
+- **Heartbeat tuning:** set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to adjust verbose heartbeat cadence.
 
 ## Install
 

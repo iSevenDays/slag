@@ -4,11 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.14
+## What's new in v1.3.15
 
-- Subagent now auto-detects too: `SLAG_SMITH_SUBAGENT` uses the same default smith detection as `SLAG_SMITH` (`kimi` → `codex` → `gemini` → `opencode` → `claude`) when unset.
-- Less config drift: founder and outcome now share one subagent command resolver.
-- Docs synced: README and website now reflect the new subagent default.
+- Better stall visibility: `--verbose` now emits periodic forge heartbeats when parallel anvils are still running, including active ingot IDs and elapsed durations.
+- New debug alias: use `--debug` as an alias for `--verbose`.
+- Heartbeat tuning: set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to adjust verbose heartbeat cadence.
 
 ## Install
 
