@@ -8,12 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.13
+## What's new in v1.3.14
 
-- **Auto smith detection:** when `SLAG_SMITH` is unset, slag now picks the first available CLI in this order: `kimi`, `codex`, `gemini`, `opencode`, then `claude`.
-- **Kimi compatibility mode:** slag detects native Kimi CLI and uses `kimi --print`; Claude-compatible Kimi wrappers still work automatically.
-- **Cleaner env handling:** empty `SLAG_SMITH*` values are treated as unset, reducing misconfiguration issues.
-- **Routing tests added:** smith selection priority and fallback behavior are now covered by unit tests.
+- **Subagent now auto-detects too:** `SLAG_SMITH_SUBAGENT` now uses the same default smith detection as `SLAG_SMITH` (`kimi` → `codex` → `gemini` → `opencode` → `claude`) when unset.
+- **Less config drift:** founder and outcome now share one subagent command resolver, so both phases follow the same fallback behavior.
+- **Docs synced:** README and website now reflect the new subagent default.
 
 ## Install
 

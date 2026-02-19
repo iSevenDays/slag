@@ -4,12 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.13
+## What's new in v1.3.14
 
-- Auto smith detection: if `SLAG_SMITH` is unset, slag picks the first available CLI in this order: `kimi`, `codex`, `gemini`, `opencode`, then `claude`.
-- Better Kimi handling: native Kimi CLI uses `--print`, while Claude-compatible Kimi wrappers still work automatically.
-- Cleaner env parsing: empty `SLAG_SMITH*` values are treated as unset.
-- Added unit tests for smith selection priority and fallback behavior.
+- Subagent now auto-detects too: `SLAG_SMITH_SUBAGENT` uses the same default smith detection as `SLAG_SMITH` (`kimi` → `codex` → `gemini` → `opencode` → `claude`) when unset.
+- Less config drift: founder and outcome now share one subagent command resolver.
+- Docs synced: README and website now reflect the new subagent default.
 
 ## Install
 
