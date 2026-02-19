@@ -215,6 +215,8 @@ Even when all ingots are forged, slag runs an **independent validator pass** to 
 2. **PASS/FAIL decision** -- `PASS` finishes pipeline, `FAIL` must include repair ingots
 3. **Auto-repair loop** -- repair ingots are appended to `PLAN.md` and forged in the next cycle
 4. **Behavior-first proofs** -- validator requires runtime-focused checks (browser/runtime assertions for web/sim apps)
+5. **Format recovery** -- if validator output is malformed (missing `STATUS:`/`TEST:`), slag re-runs validation with a strict recast prompt and fallback TEST inference
+6. **Never dead-stop on format drift** -- if FAIL output omits repair ingots, slag synthesizes a repair ingot so the forge cycle can continue
 
 Disable this closing loop with `--no-outcome`.
 

@@ -64,7 +64,7 @@ PRD.md → SURVEYOR → FOUNDER → FORGE → [REVIEW] → OUTCOME → ASSAY →
 2. **Founder**: Cast S-expression ingots → PLAN.md (with strict re-cast recovery and multiline ingot parsing)
 3. **Forge**: Execute ingots via Claude, verify with proof commands
 4. **Review**: (--worktree) CI checks + AI review before merge
-5. **Outcome**: Independent validator checks user-visible behavior; queues repair ingots on fail
+5. **Outcome**: Independent validator checks user-visible behavior; malformed validator output is auto-recast/fallback-parsed so repair loop still continues
 6. **Assay**: Final report
 
 ## Ingot Format

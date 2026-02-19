@@ -102,6 +102,7 @@ Default forge output is compact for readability. Use `--verbose` for detailed pe
 ### 4. OUTCOME
 Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.
 Set `SLAG_SMITH_OUTCOME` to run this validator on a faster model profile if desired.
+If validator output is malformed (for example prose without `TEST:`), slag recasts validation and falls back to inferred/runtime proofs so the loop continues.
 
 ### 5. ASSAY
 Final quality report. Shows forged/cracked counts, temperature bar, and identifies any cracked ingots. Exits 0 on full forge, 1 if any ingot cracked.
