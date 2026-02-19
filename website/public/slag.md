@@ -105,6 +105,8 @@ Set `SLAG_SMITH_OUTCOME` to run this validator on a specific model profile if de
 Validator/recast calls are timeout-bounded via `SLAG_OUTCOME_TIMEOUT_SECS` (default 180). Proof/test commands are timeout-bounded via `SLAG_PROOF_TIMEOUT_SECS` (default 120).
 If validator output is malformed (for example prose without `TEST:`), slag recasts validation and falls back to inferred/runtime proofs so the loop continues.
 For web/simulation outcomes, outcome TEST commands must be headless and emit a screenshot to `$SLAG_OUTCOME_SCREENSHOT` (default `logs/outcome-smoke.png`).
+For uncertain web outcomes, slag can force deterministic validation via `scripts/outcome_web_smoke.js` (page loads, runtime metric > 0, zero console errors, screenshot artifact).
+Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default `npx -y @anthropic-ai/claude-code -p`, timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
 
 ### 5. ASSAY
 Final quality report. Shows forged/cracked counts, temperature bar, and identifies any cracked ingots. Exits 0 on full forge, 1 if any ingot cracked.

@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use crate::config::{BLUEPRINT, CRUCIBLE, MAX_ITERATE, ORE_FILE};
 use crate::crucible::{self, Crucible};
 use crate::error::SlagError;
 use crate::flux;
+use crate::smith::claude::ClaudeSmith;
 use crate::smith::{self, Smith};
 use crate::tui;
 
@@ -50,6 +53,19 @@ pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
 
         raw = smith::self_iterate(smith, retry_raw, MAX_ITERATE).await?;
         ingots = crucible::parse_ingot_lines(&raw);
+    }
+
+    if ingots.is_empty() {
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            "Founder produced no ingots; escalating to subagent",
+        );
+        if let Some((_handoff_raw, handoff_ingots)) =
+            try_subagent_founder(&ore, &blueprint, &raw).await
+        {
+            ingots = handoff_ingots;
+        }
     }
 
     if ingots.is_empty() {
@@ -113,4 +129,80 @@ fn log_to_file(label: &str, content: &str) {
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = format!("{}/{ts}_{label}.log", crate::config::LOG_DIR);
     let _ = std::fs::write(&path, content);
+}
+
+fn subagent_command() -> String {
+    std::env::var("SLAG_SMITH_SUBAGENT")
+        .unwrap_or_else(|_| "npx -y @anthropic-ai/claude-code -p".to_string())
+}
+
+fn subagent_timeout_secs() -> u64 {
+    std::env::var("SLAG_SUBAGENT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(90)
+}
+
+async fn try_subagent_founder(
+    ore: &str,
+    blueprint: &str,
+    previous_raw: &str,
+) -> Option<(String, Vec<crate::sexp::Ingot>)> {
+    let subagent = ClaudeSmith::new(subagent_command());
+    let prompt = format!(
+        "{}\n\n[SUBAGENT ESCALATION]\n\
+        Primary founder returned no valid ingots after retries.\n\
+        Return ONLY valid `(ingot ...)` S-expression lines. No prose.",
+        flux::founder_recast_prompt(ore, blueprint, previous_raw)
+    );
+    log_to_file("FOUNDER_SUBAGENT_PROMPT", &prompt);
+
+    let raw = match tokio::time::timeout(
+        Duration::from_secs(subagent_timeout_secs()),
+        subagent.invoke(&prompt),
+    )
+    .await
+    {
+        Ok(Ok(raw)) => raw,
+        Ok(Err(e)) => {
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                &format!("Subagent founder handoff failed: {e}"),
+            );
+            return None;
+        }
+        Err(_) => {
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                "Subagent founder handoff timed out; keeping original founder output",
+            );
+            return None;
+        }
+    };
+
+    let raw = match smith::self_iterate(&subagent, raw, MAX_ITERATE).await {
+        Ok(v) => v,
+        Err(e) => {
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                &format!("Subagent founder self-iterate failed: {e}"),
+            );
+            return None;
+        }
+    };
+    log_to_file("FOUNDER_SUBAGENT_RAW", &raw);
+    let ingots = crucible::parse_ingot_lines(&raw);
+    if ingots.is_empty() {
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            "Subagent founder handoff returned no ingots",
+        );
+        return None;
+    }
+    Some((raw, ingots))
 }

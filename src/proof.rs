@@ -23,6 +23,13 @@ pub async fn run_shell(cmd: &str) -> (bool, String) {
 }
 
 pub async fn run_shell_with_timeout(cmd: &str, timeout_secs: u64) -> (bool, String) {
+    if let Some(reason) = blocked_shell_reason(cmd) {
+        return (
+            false,
+            format!("blocked dangerous command in proof/test: {reason}"),
+        );
+    }
+
     let mut command = tokio::process::Command::new("bash");
     command
         .args(["-c", cmd])
@@ -48,6 +55,34 @@ pub async fn run_shell_with_timeout(cmd: &str, timeout_secs: u64) -> (bool, Stri
             format!("timeout after {timeout_secs}s: command did not finish"),
         ),
     }
+}
+
+fn blocked_shell_reason(cmd: &str) -> Option<&'static str> {
+    let lowered = cmd.to_ascii_lowercase();
+
+    if lowered.contains("rm -rf") {
+        return Some("rm -rf");
+    }
+    if lowered.contains("git reset --hard") {
+        return Some("git reset --hard");
+    }
+    if lowered.contains("git checkout --") {
+        return Some("git checkout --");
+    }
+    if lowered.contains("git clean -fd") || lowered.contains("git clean -xdf") {
+        return Some("git clean");
+    }
+    if lowered.contains("mkfs.") || lowered.contains("mkfs ") {
+        return Some("mkfs");
+    }
+    if lowered.contains("dd if=/dev/zero of=/dev/") {
+        return Some("dd to /dev");
+    }
+    if lowered.contains(":(){") || lowered.contains("fork bomb") {
+        return Some("fork bomb");
+    }
+
+    None
 }
 
 /// Verify an ingot's proof command.
@@ -129,6 +164,13 @@ mod tests {
         let (ok, output) = run_shell_with_timeout("sleep 2", 1).await;
         assert!(!ok);
         assert!(output.contains("timeout after 1s"));
+    }
+
+    #[tokio::test]
+    async fn run_shell_blocks_dangerous_command() {
+        let (ok, output) = run_shell_with_timeout("rm -rf /tmp/anything", 10).await;
+        assert!(!ok);
+        assert!(output.contains("blocked dangerous command"));
     }
 
     #[tokio::test]

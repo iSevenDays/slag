@@ -185,8 +185,10 @@ When all ingots are forged, slag runs an independent tester/commenter pass:
 3. **Auto-repair** -- repair ingots are appended to `PLAN.md` and forged in next cycle
 4. **Behavior-first proofs** -- requires runtime checks, not only file-existence checks
 5. **Screenshot requirement for web outcomes** -- browser/simulation TEST commands must write a non-empty screenshot artifact to `logs/outcome-smoke.png` (or `$SLAG_OUTCOME_SCREENSHOT`)
-6. **Format recovery** -- malformed validator output is recast with strict schema; TEST/status may be inferred from structured prose when possible
-7. **Loop continuity** -- when validator fails, times out, or returns FAIL without repair ingots, slag queues synthetic repair work to avoid dead-stop
+6. **Deterministic web smoke fallback** -- on uncertain web outcomes, slag can run `scripts/outcome_web_smoke.js` to verify page load + runtime metric + console health + screenshot
+7. **Uncertainty handoff** -- low-confidence founder/outcome cases escalate once to `SLAG_SMITH_SUBAGENT`
+8. **Format recovery** -- malformed validator output is recast with strict schema; TEST/status may be inferred from structured prose when possible
+9. **Loop continuity** -- when validator fails, times out, or returns FAIL without repair ingots, slag queues synthetic repair work to avoid dead-stop
 
 Disable this with `--no-outcome`.
 
@@ -305,7 +307,9 @@ slag uses metallurgical vocabulary.
 |----------|---------|-------------|
 | `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Base smith command |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator command (non-interactive by default; override for a specific model/profile) |
+| `SLAG_SMITH_SUBAGENT` | `npx -y @anthropic-ai/claude-code -p` | Optional uncertainty fallback smith (used only for low-confidence founder/outcome cases) |
 | `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each outcome validator/recast response before fallback fail path |
+| `SLAG_SUBAGENT_TIMEOUT_SECS` | `90` | Max seconds for each subagent fallback invocation |
 | `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
 
 ### Smith Selection

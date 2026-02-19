@@ -102,9 +102,10 @@ pub fn spinner(msg: &str) -> ProgressBar {
     pb.set_style(
         ProgressStyle::default_spinner()
             .tick_chars("◐◓◑◒ ")
-            .template(&format!("   {{spinner}} {msg}"))
+            .template("   {spinner} {msg}")
             .unwrap(),
     );
+    pb.set_message(msg.to_string());
     pb.enable_steady_tick(std::time::Duration::from_millis(150));
     pb
 }
@@ -115,9 +116,10 @@ pub fn spark_spinner(msg: &str) -> ProgressBar {
     pb.set_style(
         ProgressStyle::default_spinner()
             .tick_strings(&["ite", "·te", "··e", "···", "i··", "it·"])
-            .template(&format!("   {{spinner}} {msg}"))
+            .template("   {spinner} {msg}")
             .unwrap(),
     );
+    pb.set_message(msg.to_string());
     pb.enable_steady_tick(std::time::Duration::from_millis(150));
     pb
 }

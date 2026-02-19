@@ -75,7 +75,9 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 |----------|---------|---------|
 | `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Main smith for survey/founder/forge |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
+| `SLAG_SMITH_SUBAGENT` | `npx -y @anthropic-ai/claude-code -p` | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
 | `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each validator/recast response before fallback fail path |
+| `SLAG_SUBAGENT_TIMEOUT_SECS` | `90` | Max seconds for each subagent fallback invocation |
 | `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
 
 ## Progress display
@@ -218,8 +220,10 @@ Even when all ingots are forged, slag runs an **independent validator pass** to 
 3. **Auto-repair loop** -- repair ingots are appended to `PLAN.md` and forged in the next cycle
 4. **Behavior-first proofs** -- validator requires runtime-focused checks (browser/runtime assertions for web/sim apps)
 5. **Screenshot requirement for web outcomes** -- browser/simulation TEST commands must write a non-empty screenshot artifact to `logs/outcome-smoke.png` (or `$SLAG_OUTCOME_SCREENSHOT`)
-6. **Format recovery** -- if validator output is malformed (missing `STATUS:`/`TEST:`), slag re-runs validation with a strict recast prompt and fallback TEST inference
-7. **Never dead-stop on validator drift/timeouts** -- if validator fails/times out/omits repair ingots, slag falls back to fail-path + synthetic repair ingot so the cycle continues
+6. **Deterministic web smoke fallback** -- for uncertain web outcomes, slag can run `scripts/outcome_web_smoke.js` to verify page load, runtime metric > 0, console errors = 0, and screenshot output
+7. **Uncertainty handoff** -- if founder returns zero ingots or outcome confidence is low, slag escalates once to `SLAG_SMITH_SUBAGENT`
+8. **Format recovery** -- if validator output is malformed (missing `STATUS:`/`TEST:`), slag re-runs validation with a strict recast prompt and fallback TEST inference
+9. **Never dead-stop on validator drift/timeouts** -- if validator fails/times out/omits repair ingots, slag falls back to fail-path + synthetic repair ingot so the cycle continues
 
 Disable this closing loop with `--no-outcome`.
 

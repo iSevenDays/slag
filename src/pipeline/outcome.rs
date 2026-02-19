@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::{BLUEPRINT, CRUCIBLE, LEDGER, MAX_ITERATE, ORE_FILE};
 use crate::crucible::{self, Crucible};
@@ -8,12 +8,15 @@ use crate::error::SlagError;
 use crate::flux;
 use crate::proof;
 use crate::sexp::{Ingot, Skill, Status};
+use crate::smith::claude::ClaudeSmith;
 use crate::smith::Smith;
 use crate::tui;
 
 const MAX_REPAIR_INGOTS: usize = 4;
 const DEFAULT_OUTCOME_VALIDATOR_TIMEOUT_SECS: u64 = 180;
+const DEFAULT_SUBAGENT_TIMEOUT_SECS: u64 = 90;
 const OUTCOME_SCREENSHOT_PATH: &str = "logs/outcome-smoke.png";
+const DETERMINISTIC_WEB_SMOKE_SCRIPT: &str = "scripts/outcome_web_smoke.js";
 
 /// Independent closing-loop validation focused on user-visible outcomes.
 /// Returns Ok(true) when outcome passes, Ok(false) when repair ingots were queued.
@@ -38,7 +41,8 @@ pub async fn validate_and_queue(
         .filter(|v| *v > 0)
         .unwrap_or(DEFAULT_OUTCOME_VALIDATOR_TIMEOUT_SECS);
 
-    let spinner = tui::spinner("validating outcome...");
+    let (spinner, spinner_progress) =
+        start_timeout_spinner("validating outcome", validator_timeout_secs);
     let mut recast_allowed = true;
     let response = match tokio::time::timeout(
         Duration::from_secs(validator_timeout_secs),
@@ -68,11 +72,12 @@ pub async fn validate_and_queue(
             "STATUS: FAIL\nCOMMENT: outcome validator timed out\nTEST:\n".into()
         }
     };
-    spinner.finish_and_clear();
+    stop_timeout_spinner(&spinner, spinner_progress);
 
     log_to_file("OUTCOME_RAW", &response);
     let mut response = response;
     let mut decision = parse_outcome_response(&response);
+    let mut format_retries = 0usize;
     for attempt in 1..=MAX_ITERATE {
         if !recast_allowed {
             break;
@@ -80,6 +85,7 @@ pub async fn validate_and_queue(
         if decision.status_known && !decision.test_cmd.trim().is_empty() {
             break;
         }
+        format_retries += 1;
         tui::status_line(
             "↺",
             tui::COLD,
@@ -88,7 +94,8 @@ pub async fn validate_and_queue(
         let recast_prompt =
             flux::prepare_outcome_recast_flux(&ore, &blueprint, &crucible, &ledger_tail, &response);
         log_to_file(&format!("OUTCOME_RECAST_PROMPT_{attempt}"), &recast_prompt);
-        let retry_spinner = tui::spinner("re-validating...");
+        let (retry_spinner, retry_progress) =
+            start_timeout_spinner("re-validating", validator_timeout_secs);
         let retry_raw = match tokio::time::timeout(
             Duration::from_secs(validator_timeout_secs),
             smith.invoke(&recast_prompt),
@@ -97,7 +104,7 @@ pub async fn validate_and_queue(
         {
             Ok(Ok(raw)) => raw,
             Ok(Err(e)) => {
-                retry_spinner.finish_and_clear();
+                stop_timeout_spinner(&retry_spinner, retry_progress);
                 tui::status_line(
                     "↺",
                     tui::COLD,
@@ -106,7 +113,7 @@ pub async fn validate_and_queue(
                 break;
             }
             Err(_) => {
-                retry_spinner.finish_and_clear();
+                stop_timeout_spinner(&retry_spinner, retry_progress);
                 tui::status_line(
                     "↺",
                     tui::COLD,
@@ -117,36 +124,69 @@ pub async fn validate_and_queue(
                 break;
             }
         };
-        retry_spinner.finish_and_clear();
+        stop_timeout_spinner(&retry_spinner, retry_progress);
         log_to_file(&format!("OUTCOME_RECAST_RAW_{attempt}"), &retry_raw);
         response = retry_raw;
         decision = parse_outcome_response(&response);
     }
 
-    let comment = if decision.comment.is_empty() {
-        "no comment".to_string()
-    } else {
-        decision.comment.clone()
-    };
-    let mut test_cmd = decision.test_cmd.trim().to_string();
-    let mut used_fallback_test = false;
-    if test_cmd.is_empty() {
-        if let Ok(current_crucible) = Crucible::load(Path::new(CRUCIBLE)) {
-            if let Some(fallback) = fallback_outcome_test(&current_crucible, requires_browser_test)
-            {
-                test_cmd = fallback;
-                used_fallback_test = true;
-            }
+    let malformed_twice = format_retries >= 2;
+    let mut comment = resolve_comment(&decision);
+    let (mut test_cmd, mut used_fallback_test) = resolve_test_cmd(&decision, requires_browser_test);
+    let mut weak_pass_conflict =
+        decision.passed && looks_like_weak_test(&test_cmd, requires_browser_test);
+
+    if malformed_twice || weak_pass_conflict {
+        let reason = if malformed_twice && weak_pass_conflict {
+            "malformed outcome response retries and weak PASS test"
+        } else if malformed_twice {
+            "malformed outcome response retries"
+        } else {
+            "PASS text conflicts with weak TEST"
+        };
+        if let Some(subagent_raw) = try_outcome_subagent(
+            &ore,
+            &blueprint,
+            &crucible,
+            &ledger_tail,
+            &response,
+            reason,
+            verbose,
+        )
+        .await
+        {
+            response = subagent_raw;
+            decision = parse_outcome_response(&response);
+            comment = resolve_comment(&decision);
+            let (candidate_cmd, candidate_used_fallback) =
+                resolve_test_cmd(&decision, requires_browser_test);
+            test_cmd = candidate_cmd;
+            used_fallback_test = candidate_used_fallback;
+            weak_pass_conflict =
+                decision.passed && looks_like_weak_test(&test_cmd, requires_browser_test);
         }
     }
-    if test_cmd.is_empty() {
-        // Never dead-stop the cycle due to malformed validator formatting.
-        // Force FAIL path and queue a repair ingot.
-        test_cmd = "false".into();
-        used_fallback_test = true;
-    }
+
     if used_fallback_test {
         println!("  \x1b[38;5;220m↺\x1b[0m validator did not provide TEST; using fallback command");
+    }
+
+    let mut used_deterministic_smoke = false;
+    if requires_browser_test
+        && (used_fallback_test
+            || !looks_like_browser_test(&test_cmd)
+            || weak_pass_conflict
+            || malformed_twice)
+    {
+        if let Some(smoke_cmd) = deterministic_web_smoke_cmd(&test_cmd) {
+            used_deterministic_smoke = true;
+            test_cmd = smoke_cmd;
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                "Using deterministic web smoke fallback TEST",
+            );
+        }
     }
 
     println!(
@@ -166,6 +206,7 @@ pub async fn validate_and_queue(
     if requires_browser_test {
         let _ = std::fs::remove_file(OUTCOME_SCREENSHOT_PATH);
     }
+
     let test_cmd_to_run = if requires_browser_test {
         format!("SLAG_OUTCOME_SCREENSHOT=\"{OUTCOME_SCREENSHOT_PATH}\" {test_cmd}")
     } else {
@@ -174,6 +215,7 @@ pub async fn validate_and_queue(
     let (test_ok, test_output) = proof::run_shell(&test_cmd_to_run).await;
     let screenshot_ok =
         !requires_browser_test || screenshot_artifact_ok(Path::new(OUTCOME_SCREENSHOT_PATH));
+    let evidence = extract_outcome_evidence(&test_output, OUTCOME_SCREENSHOT_PATH, screenshot_ok);
     log_to_file(
         "OUTCOME_TEST",
         &format!(
@@ -194,6 +236,19 @@ pub async fn validate_and_queue(
                 tui::truncate(&comment, 90)
             }
         );
+        if requires_browser_test {
+            println!(
+                "  \x1b[90mevidence:\x1b[0m screenshot={} metric={} console_errors={}{}",
+                evidence.screenshot,
+                evidence.metric_display(),
+                evidence.console_errors_display(),
+                if used_deterministic_smoke {
+                    " (deterministic smoke)"
+                } else {
+                    ""
+                }
+            );
+        }
         return Ok(true);
     }
 
@@ -257,6 +312,148 @@ struct OutcomeDecision {
     comment: String,
     test_cmd: String,
     repair_ingots: Vec<Ingot>,
+}
+
+#[derive(Debug, Clone)]
+struct OutcomeEvidence {
+    screenshot: String,
+    metric_label: Option<String>,
+    metric_value: Option<i64>,
+    console_errors: Option<usize>,
+}
+
+impl OutcomeEvidence {
+    fn metric_display(&self) -> String {
+        match (&self.metric_label, self.metric_value) {
+            (Some(label), Some(value)) => format!("{label}:{value}"),
+            _ => "unknown".to_string(),
+        }
+    }
+
+    fn console_errors_display(&self) -> String {
+        self.console_errors
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+}
+
+fn resolve_comment(decision: &OutcomeDecision) -> String {
+    if decision.comment.is_empty() {
+        "no comment".to_string()
+    } else {
+        decision.comment.clone()
+    }
+}
+
+fn resolve_test_cmd(decision: &OutcomeDecision, requires_browser_test: bool) -> (String, bool) {
+    let mut test_cmd = decision.test_cmd.trim().to_string();
+    let mut used_fallback_test = false;
+    if test_cmd.is_empty() {
+        if let Ok(current_crucible) = Crucible::load(Path::new(CRUCIBLE)) {
+            if let Some(fallback) = fallback_outcome_test(&current_crucible, requires_browser_test)
+            {
+                test_cmd = fallback;
+                used_fallback_test = true;
+            }
+        }
+    }
+    if test_cmd.is_empty() {
+        test_cmd = "false".into();
+        used_fallback_test = true;
+    }
+    (test_cmd, used_fallback_test)
+}
+
+fn start_timeout_spinner(
+    label: &str,
+    timeout_secs: u64,
+) -> (indicatif::ProgressBar, tokio::task::JoinHandle<()>) {
+    let spinner = tui::spinner(&format!("{label} (0/{timeout_secs}s)..."));
+    let spinner_clone = spinner.clone();
+    let label = label.to_string();
+    let started = Instant::now();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let elapsed = started.elapsed().as_secs().min(timeout_secs);
+            spinner_clone.set_message(format!("{label} ({elapsed}/{timeout_secs}s)..."));
+            if elapsed >= timeout_secs {
+                break;
+            }
+        }
+    });
+    (spinner, task)
+}
+
+fn stop_timeout_spinner(spinner: &indicatif::ProgressBar, task: tokio::task::JoinHandle<()>) {
+    task.abort();
+    spinner.finish_and_clear();
+}
+
+fn subagent_command() -> String {
+    std::env::var("SLAG_SMITH_SUBAGENT")
+        .unwrap_or_else(|_| "npx -y @anthropic-ai/claude-code -p".to_string())
+}
+
+fn subagent_timeout_secs() -> u64 {
+    std::env::var("SLAG_SUBAGENT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SUBAGENT_TIMEOUT_SECS)
+}
+
+async fn try_outcome_subagent(
+    ore: &str,
+    blueprint: &str,
+    crucible: &str,
+    ledger_tail: &str,
+    previous_raw: &str,
+    reason: &str,
+    verbose: bool,
+) -> Option<String> {
+    let subagent = ClaudeSmith::new(subagent_command());
+    let prompt = format!(
+        "{}\n\n\
+        [SUBAGENT ESCALATION]\n\
+        Reason: {reason}\n\
+        Previous validator output:\n{previous_raw}\n\n\
+        Return ONLY STATUS/COMMENT/TEST (+ optional repair ingots) in exact required format.\n\
+        Do not ask questions.",
+        flux::prepare_outcome_recast_flux(ore, blueprint, crucible, ledger_tail, previous_raw)
+    );
+    log_to_file("OUTCOME_SUBAGENT_PROMPT", &prompt);
+    tui::status_line("↺", tui::COLD, "Escalating outcome validation to subagent");
+
+    let (spinner, progress) = start_timeout_spinner("subagent validating", subagent_timeout_secs());
+    let raw = match tokio::time::timeout(
+        Duration::from_secs(subagent_timeout_secs()),
+        subagent.invoke(&prompt),
+    )
+    .await
+    {
+        Ok(Ok(raw)) => raw,
+        Ok(Err(e)) => {
+            stop_timeout_spinner(&spinner, progress);
+            tui::status_line("↺", tui::COLD, &format!("Subagent validation failed: {e}"));
+            return None;
+        }
+        Err(_) => {
+            stop_timeout_spinner(&spinner, progress);
+            tui::status_line("↺", tui::COLD, "Subagent validation timed out");
+            return None;
+        }
+    };
+    stop_timeout_spinner(&spinner, progress);
+    log_to_file("OUTCOME_SUBAGENT_RAW", &raw);
+    if verbose {
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            &format!("Subagent validator output size: {} bytes", raw.len()),
+        );
+    }
+    Some(raw)
 }
 
 fn parse_outcome_response(raw: &str) -> OutcomeDecision {
@@ -398,6 +595,9 @@ fn fallback_outcome_test(crucible: &Crucible, requires_browser_test: bool) -> Op
         if generic_fallback.is_none() {
             generic_fallback = Some(proof.to_string());
         }
+    }
+    if requires_browser_test {
+        return deterministic_web_smoke_cmd(generic_fallback.as_deref().unwrap_or_default());
     }
     generic_fallback
 }
@@ -545,12 +745,110 @@ fn looks_like_browser_test(cmd: &str) -> bool {
         || c.contains("page.goto")
         || c.contains("web-test")
         || c.contains("headless")
+        || c.contains("outcome_web_smoke.js")
 }
 
 fn screenshot_artifact_ok(path: &Path) -> bool {
     std::fs::metadata(path)
         .map(|m| m.is_file() && m.len() > 0)
         .unwrap_or(false)
+}
+
+fn looks_like_weak_test(cmd: &str, requires_browser_test: bool) -> bool {
+    let lowered = cmd.trim().to_ascii_lowercase();
+    if lowered.is_empty() || lowered == "true" || lowered == "echo ok" {
+        return true;
+    }
+    if requires_browser_test {
+        return !looks_like_browser_test(&lowered);
+    }
+    if lowered.contains("cargo test")
+        || lowered.contains("npm test")
+        || lowered.contains("pnpm test")
+        || lowered.contains("yarn test")
+        || lowered.contains("pytest")
+        || lowered.contains("playwright")
+        || lowered.contains("outcome_web_smoke.js")
+    {
+        return false;
+    }
+    lowered.contains("test -f")
+        || lowered.contains("grep -q")
+        || lowered.contains("node --check")
+        || lowered.contains("cargo fmt")
+        || lowered.contains("npm run build")
+}
+
+fn deterministic_web_smoke_cmd(reference_cmd: &str) -> Option<String> {
+    if !Path::new(DETERMINISTIC_WEB_SMOKE_SCRIPT).exists() {
+        return None;
+    }
+    let mut cmd = format!(
+        "node {}",
+        shell_single_quote(DETERMINISTIC_WEB_SMOKE_SCRIPT)
+    );
+    if let Some(cwd) = infer_cwd_from_command(reference_cmd) {
+        cmd.push_str(&format!(" --cwd {}", shell_single_quote(&cwd)));
+    }
+    Some(cmd)
+}
+
+fn infer_cwd_from_command(cmd: &str) -> Option<String> {
+    let trimmed = cmd.trim();
+    let rest = trimmed.strip_prefix("cd ")?;
+    let end = rest
+        .find("&&")
+        .or_else(|| rest.find(';'))
+        .unwrap_or(rest.len());
+    let candidate = rest[..end].trim().trim_matches('"').trim_matches('\'');
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn shell_single_quote(v: &str) -> String {
+    format!("'{}'", v.replace('\'', "'\"'\"'"))
+}
+
+fn extract_outcome_evidence(
+    output: &str,
+    screenshot: &str,
+    screenshot_ok: bool,
+) -> OutcomeEvidence {
+    let mut evidence = OutcomeEvidence {
+        screenshot: if screenshot_ok {
+            screenshot.to_string()
+        } else {
+            "missing".to_string()
+        },
+        metric_label: None,
+        metric_value: None,
+        console_errors: None,
+    };
+
+    if let (Some(start), Some(end)) = (output.find('{'), output.rfind('}')) {
+        if start < end {
+            let maybe_json = &output[start..=end];
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(maybe_json) {
+                evidence.metric_label = value
+                    .get("metricLabel")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                evidence.metric_value = value.get("metricValue").and_then(|v| v.as_i64());
+                evidence.console_errors = value
+                    .get("consoleErrors")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                if let Some(path) = value.get("screenshot").and_then(|v| v.as_str()) {
+                    evidence.screenshot = path.to_string();
+                }
+            }
+        }
+    }
+
+    evidence
 }
 
 fn log_to_file(label: &str, content: &str) {
@@ -691,5 +989,41 @@ TEST: npm test
 
         std::fs::write(&path, b"png").expect("write");
         assert!(screenshot_artifact_ok(&path));
+    }
+
+    #[test]
+    fn weak_test_detection() {
+        assert!(looks_like_weak_test("test -f src/main.js", false));
+        assert!(!looks_like_weak_test("cargo test --all", false));
+        assert!(looks_like_weak_test("npm test && npm run build", true));
+        assert!(!looks_like_weak_test(
+            "node scripts/outcome_web_smoke.js --cwd snake-3d",
+            true
+        ));
+    }
+
+    #[test]
+    fn infer_cwd_from_cd_command() {
+        assert_eq!(
+            infer_cwd_from_command("cd snake-3d && npm test"),
+            Some("snake-3d".to_string())
+        );
+        assert_eq!(infer_cwd_from_command("npm test"), None);
+    }
+
+    #[test]
+    fn parse_outcome_evidence_json() {
+        let output = r#"{
+          "ok": true,
+          "metricLabel": "snakes",
+          "metricValue": 9,
+          "consoleErrors": 0,
+          "screenshot": "logs/outcome-smoke.png"
+        }"#;
+        let evidence = extract_outcome_evidence(output, OUTCOME_SCREENSHOT_PATH, true);
+        assert_eq!(evidence.metric_label.as_deref(), Some("snakes"));
+        assert_eq!(evidence.metric_value, Some(9));
+        assert_eq!(evidence.console_errors, Some(0));
+        assert_eq!(evidence.screenshot, "logs/outcome-smoke.png");
     }
 }
