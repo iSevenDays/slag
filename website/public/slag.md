@@ -4,12 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.20
+## What's new in v1.3.21
 
-- Stops bad smith-output loops: forge now fails fast when a smith keeps returning missing or placeholder `CMD:` lines.
-- Catches fake `CMD:` text too: template artifacts like `CMD: line in response` now count as protocol failures.
-- No more auto requeue when regeneration is empty: if analysis regeneration returns no valid ingots, slag keeps them cracked and stops retry churn.
-- New regression tests: added coverage for protocol-failure detection and empty-regeneration handling.
+- Kimi mode auto-fix: auto-detect now checks `kimi --help` and picks Claude-compatible mode when available.
+- Fewer protocol mismatches: avoids defaulting to native `--print --prompt` wrapper on Claude-style `kimi` binaries.
+- More guardrail coverage: added tests for Kimi compatibility detection and smith selection paths.
 
 ## Install
 

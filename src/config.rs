@@ -117,19 +117,32 @@ pub fn subagent_smith_command_from_env() -> String {
 }
 
 fn auto_detect_smith_command() -> Option<String> {
-    let kimi_native = resolve_command_path("kimi")
+    let kimi_path = resolve_command_path("kimi");
+    let kimi_native = kimi_path
         .as_deref()
         .map(is_native_kimi_cli)
         .unwrap_or(false);
-    choose_detected_smith(|cmd| resolve_command_path(cmd).is_some(), kimi_native)
+    let kimi_claude_compat = kimi_path
+        .as_deref()
+        .map(is_claude_compatible_kimi_cli)
+        .unwrap_or(false);
+    choose_detected_smith(
+        |cmd| resolve_command_path(cmd).is_some(),
+        kimi_native,
+        kimi_claude_compat,
+    )
 }
 
-fn choose_detected_smith<F>(mut has_cmd: F, kimi_native: bool) -> Option<String>
+fn choose_detected_smith<F>(
+    mut has_cmd: F,
+    kimi_native: bool,
+    kimi_claude_compat: bool,
+) -> Option<String>
 where
     F: FnMut(&str) -> bool,
 {
     if has_cmd("kimi") {
-        let cmd = if kimi_native {
+        let cmd = if kimi_native && !kimi_claude_compat {
             KIMI_NATIVE_WRAPPER
         } else {
             KIMI_CLAUDE_WRAPPER
@@ -185,6 +198,26 @@ fn is_native_kimi_cli(path: &Path) -> bool {
         };
     }
     false
+}
+
+fn is_claude_compatible_kimi_cli(path: &Path) -> bool {
+    let Ok(output) = std::process::Command::new(path).arg("--help").output() else {
+        return false;
+    };
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    if !output.stderr.is_empty() {
+        text.push('\n');
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    help_text_suggests_claude_compat(&text)
+}
+
+fn help_text_suggests_claude_compat(help_text: &str) -> bool {
+    let lower = help_text.to_ascii_lowercase();
+    lower.contains("usage: claude")
+        || lower.contains("claude code")
+        || lower.contains("--dangerously-skip-permissions")
+        || lower.contains("--permission-mode")
 }
 
 #[cfg(unix)]
@@ -302,32 +335,47 @@ mod tests {
 
     #[test]
     fn detected_smith_prefers_native_kimi_first() {
-        let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", true);
+        let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", true, false);
         assert_eq!(selected, Some(KIMI_NATIVE_WRAPPER.to_string()));
     }
 
     #[test]
     fn detected_smith_prefers_kimi_claude_wrapper_when_non_native() {
-        let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", false);
+        let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", false, true);
         assert_eq!(selected, Some(KIMI_CLAUDE_WRAPPER.to_string()));
     }
 
     #[test]
     fn detected_smith_prefers_codex_before_claude() {
-        let selected = choose_detected_smith(|cmd| cmd == "codex" || cmd == "claude", false);
+        let selected = choose_detected_smith(|cmd| cmd == "codex" || cmd == "claude", false, false);
         assert_eq!(selected, Some(CODEX_WRAPPER.to_string()));
     }
 
     #[test]
     fn detected_smith_falls_back_to_claude() {
-        let selected = choose_detected_smith(|cmd| cmd == "claude", false);
+        let selected = choose_detected_smith(|cmd| cmd == "claude", false, false);
         assert_eq!(selected, Some(CLAUDE_SMITH_DEFAULT.to_string()));
     }
 
     #[test]
     fn detected_smith_none_when_no_commands_available() {
-        let selected = choose_detected_smith(|_| false, false);
+        let selected = choose_detected_smith(|_| false, false, false);
         assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn detected_smith_uses_claude_wrapper_for_claude_compatible_kimi() {
+        let selected = choose_detected_smith(|cmd| cmd == "kimi", true, true);
+        assert_eq!(selected, Some(KIMI_CLAUDE_WRAPPER.to_string()));
+    }
+
+    #[test]
+    fn help_text_detector_flags_claude_compat() {
+        let help = "Usage: claude [options]\n--dangerously-skip-permissions";
+        assert!(help_text_suggests_claude_compat(help));
+        assert!(!help_text_suggests_claude_compat(
+            "Usage: kimi [options]\n--print --prompt"
+        ));
     }
 
     #[test]
