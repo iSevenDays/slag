@@ -116,6 +116,7 @@ The percentage shows overall progress: forged ingots / total ingots.
 
 By default, forge output is compact and optimized for readability. Use `--verbose` for full per-heat details and longer previews during Surveyor/Founder phases.
 Set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to control verbose heartbeat cadence for long-running anvils.
+If a previous run crashed and left ingots in `molten` state, forge now prompts with options to `requeue` (default), `crack`, or `abort`; in non-interactive runs it defaults to `requeue`. The prompt includes a best-effort re-forge time estimate from recent logs.
 
 ## Language
 

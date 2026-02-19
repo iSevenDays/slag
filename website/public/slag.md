@@ -105,6 +105,7 @@ Strikes each ingot via the configured smith. Solo ingots run on parallel anvils 
 
 Default forge output is compact for readability. Use `--verbose` (or `--debug`) for detailed per-heat logs, longer Surveyor/Founder previews, and periodic stall heartbeats.
 Set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to control verbose heartbeat cadence for long-running anvils.
+If a previous run crashed and left ingots in `molten` state, forge now prompts with options to `requeue` (default), `crack`, or `abort`; in non-interactive runs it defaults to `requeue`. The prompt includes a best-effort re-forge time estimate from recent logs.
 
 ### 4. OUTCOME
 Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.

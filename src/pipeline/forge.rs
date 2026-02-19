@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,13 @@ use crate::tui;
 use super::resmelt;
 
 const DEFAULT_VERBOSE_HEARTBEAT_SECS: u64 = 15;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleMoltenAction {
+    Requeue,
+    Crack,
+    Abort,
+}
 
 /// Result of forging an ingot, including branch name if worktree mode
 #[derive(Debug, Clone)]
@@ -230,7 +238,56 @@ pub async fn run(
         // --- Sequential for :solo nil ---
         let ingot = match crucible.next_ore() {
             Some(i) => i.clone(),
-            None => continue,
+            None => {
+                let stale_ids = stale_molten_ids(&crucible);
+                if stale_ids.is_empty() {
+                    continue;
+                }
+
+                let estimate = estimate_reforge_secs(stale_ids.len(), pipeline_config.max_anvils);
+                match choose_stale_molten_action(&stale_ids, estimate, pipeline_config.verbose)? {
+                    StaleMoltenAction::Requeue => {
+                        let recovered = recover_stale_molten_to_ore(&mut crucible);
+                        if pipeline_config.verbose {
+                            tui::status_line(
+                                "↺",
+                                tui::COLD,
+                                &format!(
+                                    "re-queued stale molten ingot(s) to ore: {}",
+                                    recovered.join(", ")
+                                ),
+                            );
+                        } else {
+                            tui::status_line(
+                                "↺",
+                                tui::COLD,
+                                &format!(
+                                    "re-queued {} stale molten ingot(s) to ore",
+                                    recovered.len()
+                                ),
+                            );
+                        }
+                    }
+                    StaleMoltenAction::Crack => {
+                        crack_stale_molten(&mut crucible);
+                        tui::status_line(
+                            "↺",
+                            tui::WARM,
+                            &format!(
+                                "marked {} stale molten ingot(s) as cracked",
+                                stale_ids.len()
+                            ),
+                        );
+                    }
+                    StaleMoltenAction::Abort => {
+                        return Err(SlagError::OutcomeFailed(
+                            "aborted by user due to stale molten ingot state".into(),
+                        ));
+                    }
+                }
+                crucible.save()?;
+                continue;
+            }
         };
 
         crucible.set_status(&ingot.id, Status::Molten);
@@ -279,6 +336,150 @@ pub async fn run(
         tui::ingot_status_line(&crucible.counts());
         println!();
     }
+}
+
+fn recover_stale_molten_to_ore(crucible: &mut Crucible) -> Vec<String> {
+    let mut recovered = Vec::new();
+    for ingot in &mut crucible.ingots {
+        if ingot.status == Status::Molten {
+            ingot.status = Status::Ore;
+            recovered.push(ingot.id.clone());
+        }
+    }
+    recovered
+}
+
+fn crack_stale_molten(crucible: &mut Crucible) {
+    for ingot in &mut crucible.ingots {
+        if ingot.status == Status::Molten {
+            ingot.status = Status::Cracked;
+        }
+    }
+}
+
+fn stale_molten_ids(crucible: &Crucible) -> Vec<String> {
+    crucible
+        .ingots
+        .iter()
+        .filter(|ingot| ingot.status == Status::Molten)
+        .map(|ingot| ingot.id.clone())
+        .collect()
+}
+
+fn choose_stale_molten_action(
+    stale_ids: &[String],
+    estimate_secs: Option<u64>,
+    verbose: bool,
+) -> Result<StaleMoltenAction, SlagError> {
+    if !io::stdin().is_terminal() {
+        return Ok(StaleMoltenAction::Requeue);
+    }
+
+    println!();
+    tui::status_line(
+        "?",
+        tui::BRIGHT,
+        &format!(
+            "Detected {} stale molten ingot(s) from an interrupted forge",
+            stale_ids.len()
+        ),
+    );
+    if verbose {
+        println!("  \x1b[90mids: {}\x1b[0m", stale_ids.join(", "));
+    }
+    if let Some(secs) = estimate_secs {
+        println!(
+            "  \x1b[90mestimated re-forge: ~{} (from recent log samples)\x1b[0m",
+            tui::format_elapsed(secs)
+        );
+    } else {
+        println!("  \x1b[90mestimated re-forge: unknown (insufficient log samples)\x1b[0m");
+    }
+
+    print!("  \x1b[38;5;220m?\x1b[0m Choose action [R]equeue (default) / [C]rack / [A]bort: ");
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return Ok(StaleMoltenAction::Requeue);
+    }
+
+    let choice = input.trim().to_ascii_lowercase();
+    let action = match choice.as_str() {
+        "c" | "crack" => StaleMoltenAction::Crack,
+        "a" | "abort" => StaleMoltenAction::Abort,
+        _ => StaleMoltenAction::Requeue,
+    };
+    Ok(action)
+}
+
+fn estimate_reforge_secs(stale_count: usize, max_anvils: usize) -> Option<u64> {
+    let entries = std::fs::read_dir(crate::config::LOG_DIR).ok()?;
+    let mut per_heat: HashMap<String, (Option<i64>, Option<i64>)> = HashMap::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(ts) = parse_log_ts(&name) else {
+            continue;
+        };
+        let Some(label) = log_label(&name) else {
+            continue;
+        };
+
+        if let Some(key) = label.strip_prefix("FLUX_") {
+            let slot = per_heat.entry(key.to_string()).or_insert((None, None));
+            if slot.0.map(|v| ts > v).unwrap_or(true) {
+                slot.0 = Some(ts);
+            }
+            continue;
+        }
+        if let Some(key) = label.strip_prefix("ASSAY_") {
+            let slot = per_heat.entry(key.to_string()).or_insert((None, None));
+            if slot.1.map(|v| ts > v).unwrap_or(true) {
+                slot.1 = Some(ts);
+            }
+        }
+    }
+
+    let mut samples = Vec::new();
+    for (_, (flux, assay)) in per_heat {
+        let (Some(start), Some(end)) = (flux, assay) else {
+            continue;
+        };
+        if end < start {
+            continue;
+        }
+        let d = (end - start) as u64;
+        if (1..=3600).contains(&d) {
+            samples.push(d);
+        }
+    }
+    if samples.is_empty() {
+        return None;
+    }
+
+    samples.sort_unstable();
+    let median = samples[samples.len() / 2];
+    let anvils = max_anvils.max(1);
+    let batches = (stale_count.max(1) + anvils - 1) / anvils;
+    Some(median.saturating_mul(batches as u64))
+}
+
+fn parse_log_ts(filename: &str) -> Option<i64> {
+    if filename.len() < 15 {
+        return None;
+    }
+    let prefix = &filename[..15];
+    let dt = chrono::NaiveDateTime::parse_from_str(prefix, "%Y%m%d_%H%M%S").ok()?;
+    Some(dt.and_utc().timestamp())
+}
+
+fn log_label(filename: &str) -> Option<&str> {
+    if !filename.ends_with(".log") || filename.len() < 21 {
+        return None;
+    }
+    Some(&filename[16..filename.len() - 4])
 }
 
 /// Strike a single ingot: retry with heat, extract CMD, verify proof.
@@ -645,4 +846,69 @@ fn log_to_file(label: &str, content: &str) {
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = format!("{}/{ts}_{label}.log", crate::config::LOG_DIR);
     let _ = std::fs::write(&path, content);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sexp::{Ingot, Skill};
+    use tempfile::NamedTempFile;
+
+    fn mk_ingot(id: &str, status: Status) -> Ingot {
+        Ingot {
+            id: id.to_string(),
+            status,
+            solo: true,
+            grade: 1,
+            skill: Skill::Default,
+            heat: 0,
+            max: 5,
+            smelt: 0,
+            proof: "true".to_string(),
+            work: "noop".to_string(),
+            extra: vec![],
+        }
+    }
+
+    #[test]
+    fn recover_stale_molten_to_ore_requeues_only_molten() {
+        let tmp = NamedTempFile::new().expect("tmp file");
+        let mut crucible = Crucible::new(
+            tmp.path(),
+            vec![
+                mk_ingot("i1", Status::Molten),
+                mk_ingot("i2", Status::Ore),
+                mk_ingot("i3", Status::Forged),
+                mk_ingot("i4", Status::Molten),
+            ],
+        );
+
+        let mut recovered = recover_stale_molten_to_ore(&mut crucible);
+        recovered.sort();
+
+        assert_eq!(recovered, vec!["i1".to_string(), "i4".to_string()]);
+        assert_eq!(crucible.get("i1").expect("i1").status, Status::Ore);
+        assert_eq!(crucible.get("i2").expect("i2").status, Status::Ore);
+        assert_eq!(crucible.get("i3").expect("i3").status, Status::Forged);
+        assert_eq!(crucible.get("i4").expect("i4").status, Status::Ore);
+    }
+
+    #[test]
+    fn crack_stale_molten_marks_only_molten() {
+        let tmp = NamedTempFile::new().expect("tmp file");
+        let mut crucible = Crucible::new(
+            tmp.path(),
+            vec![
+                mk_ingot("i1", Status::Molten),
+                mk_ingot("i2", Status::Ore),
+                mk_ingot("i3", Status::Forged),
+            ],
+        );
+
+        crack_stale_molten(&mut crucible);
+
+        assert_eq!(crucible.get("i1").expect("i1").status, Status::Cracked);
+        assert_eq!(crucible.get("i2").expect("i2").status, Status::Ore);
+        assert_eq!(crucible.get("i3").expect("i3").status, Status::Forged);
+    }
 }
