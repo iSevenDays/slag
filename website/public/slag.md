@@ -4,12 +4,12 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.19
+## What's new in v1.3.20
 
-- No more stuck duplicate loops: forge now normalizes duplicate ingot IDs and quarantines malformed pending ingots before retry.
-- Cleaner founder output: placeholder ingots (like `proof:SHELL`) are filtered and IDs are made unique before writing `PLAN.md`.
-- Smith timeout protection: smith invocations now time out via `SLAG_SMITH_TIMEOUT_SECS` (default `300s`) instead of hanging indefinitely.
-- Safer worktree proof execution: worktree and non-worktree proof commands now use the same timeout + dangerous-command guard path.
+- Stops bad smith-output loops: forge now fails fast when a smith keeps returning missing or placeholder `CMD:` lines.
+- Catches fake `CMD:` text too: template artifacts like `CMD: line in response` now count as protocol failures.
+- No more auto requeue when regeneration is empty: if analysis regeneration returns no valid ingots, slag keeps them cracked and stops retry churn.
+- New regression tests: added coverage for protocol-failure detection and empty-regeneration handling.
 
 ## Install
 

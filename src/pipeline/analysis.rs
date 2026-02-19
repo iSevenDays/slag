@@ -112,7 +112,22 @@ pub async fn analyze_and_prepare(
             "\n  \x1b[38;5;220m♻\x1b[0m Regenerating {} cracked ingots via founder...",
             cracked_ids.len()
         );
-        regenerate_cracked(smith, &mut crucible, &cracked_ids).await?;
+        let regenerated = regenerate_cracked(smith, &mut crucible, &cracked_ids).await?;
+        if regenerated == 0 {
+            events::emit_warn(
+                "analysis.regenerate.empty",
+                "regeneration returned no valid replacement ingots",
+                serde_json::json!({
+                    "cracked": cracked_ids.len(),
+                    "cycle": cycle
+                }),
+            );
+            println!(
+                "    \x1b[31m✗\x1b[0m regeneration produced no valid replacements; keeping cracked state"
+            );
+            crucible.save()?;
+            return Ok(false);
+        }
     } else {
         // Apply fixes and reset to ore
         for analysis in &analyses {
@@ -475,7 +490,7 @@ async fn regenerate_cracked(
     smith: &dyn Smith,
     crucible: &mut Crucible,
     cracked_ids: &[String],
-) -> Result<(), SlagError> {
+) -> Result<usize, SlagError> {
     // Build a prompt describing what needs to be regenerated
     let cracked_descriptions: Vec<String> = cracked_ids
         .iter()
@@ -511,14 +526,14 @@ async fn regenerate_cracked(
 
     if new_ingots.is_empty() {
         println!("    \x1b[31m✗\x1b[0m could not regenerate valid ingots");
-        reset_cracked_to_ore(crucible, cracked_ids);
-        return Ok(());
+        return Ok(0);
     }
 
     println!(
         "    \x1b[38;5;220m♻\x1b[0m generated {} replacement ingots",
         new_ingots.len()
     );
+    let mut added = 0usize;
 
     // Remove all cracked ingots
     for id in cracked_ids {
@@ -533,20 +548,9 @@ async fn regenerate_cracked(
             tui::truncate(&ingot.work, 50)
         );
         crucible.ingots.push(ingot);
+        added += 1;
     }
-
-    Ok(())
-}
-
-fn reset_cracked_to_ore(crucible: &mut Crucible, cracked_ids: &[String]) {
-    for id in cracked_ids {
-        if let Some(ingot) = crucible.get_mut(id) {
-            ingot.status = Status::Ore;
-            ingot.heat = 0;
-            ingot.smelt = 0;
-            ingot.solo = false; // Make sequential to be safe
-        }
-    }
+    Ok(added)
 }
 
 fn sanitize_regenerated_ingots(
@@ -668,6 +672,7 @@ fn is_concrete_work(work: &str) -> bool {
 mod tests {
     use super::*;
     use crate::sexp::{Ingot, Skill};
+    use crate::smith::mock::MockSmith;
     use std::path::PathBuf;
 
     fn ingot(id: &str, status: Status, proof: &str, work: &str) -> Ingot {
@@ -733,5 +738,25 @@ mod tests {
         assert_eq!(accepted[0].smelt, 0);
         assert_eq!(accepted[0].max, 5);
         assert_eq!(accepted[0].grade, 1);
+    }
+
+    #[tokio::test]
+    async fn regenerate_cracked_empty_output_keeps_existing_cracked_ingots() {
+        let mut crucible = crucible_with(vec![
+            ingot("i1", Status::Forged, "test -f a", "done"),
+            ingot("i2", Status::Cracked, "test -f b", "retry me"),
+        ]);
+        let cracked = vec!["i2".to_string()];
+        let smith = MockSmith::fixed(
+            "(ingot :id \"i1\" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof \"echo ok\" :work \"collision\")",
+        );
+
+        let regenerated = regenerate_cracked(&smith, &mut crucible, &cracked)
+            .await
+            .expect("regenerate result");
+
+        assert_eq!(regenerated, 0);
+        assert_eq!(crucible.ingots.len(), 2);
+        assert_eq!(crucible.get("i2").expect("i2").status, Status::Cracked);
     }
 }

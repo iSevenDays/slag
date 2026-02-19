@@ -160,11 +160,18 @@ pub async fn run(
             let mut set = tokio::task::JoinSet::new();
             for ingot in ingot_snapshots {
                 let smith_cmd = config.select(ingot.skill.as_str(), ingot.grade).to_string();
+                let smith_hint = smith_cmd.clone();
                 let worktree_mode = use_worktree;
                 set.spawn(async move {
                     let smith = ClaudeSmith::new(smith_cmd);
-                    let result =
-                        strike_ingot(&ingot, &smith, worktree_mode, OutputMode::Quiet).await;
+                    let result = strike_ingot(
+                        &ingot,
+                        &smith,
+                        &smith_hint,
+                        worktree_mode,
+                        OutputMode::Quiet,
+                    )
+                    .await;
                     (ingot.id.clone(), result)
                 });
             }
@@ -175,6 +182,7 @@ pub async fn run(
                 .map(|id| (id.clone(), Instant::now()))
                 .collect();
             let mut last_completion = Instant::now();
+            let mut protocol_failures = 0usize;
 
             // Collect results and update crucible on main thread
             loop {
@@ -254,6 +262,9 @@ pub async fn run(
                     Ok((id, Err(e))) => {
                         pending_started.remove(&id);
                         last_completion = Instant::now();
+                        if is_smith_protocol_failure(&e) {
+                            protocol_failures += 1;
+                        }
                         eprintln!(
                             "  \x1b[31m✗\x1b[0m [{}] forge infrastructure error: {e}",
                             id
@@ -266,6 +277,13 @@ pub async fn run(
                         eprintln!("  \x1b[31m✗\x1b[0m anvil panicked: {e}");
                     }
                 }
+            }
+
+            if protocol_failures > 0 && protocol_failures == solo_ids.len() {
+                return Err(SlagError::SmithFailed(format!(
+                    "all {} parallel ingot(s) failed smith protocol (missing CMD across all heats); check SLAG_SMITH/SLAG_SMITH_SUBAGENT command compatibility",
+                    protocol_failures
+                )));
             }
 
             // Show status
@@ -356,9 +374,18 @@ pub async fn run(
         );
 
         let smith_cmd = config.select(ingot.skill.as_str(), ingot.grade).to_string();
+        let smith_hint = smith_cmd.clone();
         let smith = ClaudeSmith::new(smith_cmd);
 
-        match strike_ingot(&ingot, &smith, use_worktree, sequential_output_mode).await {
+        match strike_ingot(
+            &ingot,
+            &smith,
+            &smith_hint,
+            use_worktree,
+            sequential_output_mode,
+        )
+        .await
+        {
             Ok(forge_result) => {
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
                 crucible.set_status(&ingot.id, Status::Forged);
@@ -686,6 +713,7 @@ fn log_label(filename: &str) -> Option<&str> {
 async fn strike_ingot(
     ingot: &Ingot,
     smith: &dyn Smith,
+    smith_hint: &str,
     worktree_mode: bool,
     output_mode: OutputMode,
 ) -> Result<ForgeResult, SlagError> {
@@ -693,6 +721,7 @@ async fn strike_ingot(
     let mut worktree_path: Option<String> = None;
     let mut active_ingot = ingot.clone();
     let branch_name = format!("forge/{}", ingot.id);
+    let mut protocol_cmd_fail_count = 0u8;
 
     // Create worktree if in worktree mode
     if worktree_mode {
@@ -813,6 +842,7 @@ async fn strike_ingot(
         let cmd = match proof::extract_cmd(&response) {
             Some(c) => c,
             None => {
+                protocol_cmd_fail_count = protocol_cmd_fail_count.saturating_add(1);
                 slag = Some("NO CMD: line in response".into());
                 if !output_mode.is_quiet() {
                     if output_mode.is_verbose() {
@@ -824,6 +854,19 @@ async fn strike_ingot(
                 continue;
             }
         };
+
+        if is_protocol_placeholder_cmd(&cmd) {
+            protocol_cmd_fail_count = protocol_cmd_fail_count.saturating_add(1);
+            slag = Some(format!("INVALID CMD: {}", tui::truncate(&cmd, 80)));
+            if !output_mode.is_quiet() {
+                if output_mode.is_verbose() {
+                    println!("\x1b[31m✗\x1b[0m smith output has placeholder/invalid CMD line");
+                } else {
+                    println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
+                }
+            }
+            continue;
+        }
 
         if output_mode.is_verbose() {
             print!("\x1b[90m{}\x1b[0m ", tui::truncate(&cmd, 32));
@@ -914,10 +957,50 @@ async fn strike_ingot(
         worktree::cleanup_without_merge(&active_ingot.id).await;
     }
 
+    if protocol_cmd_fail_count >= active_ingot.max.max(1) {
+        return Err(SlagError::SmithFailed(format!(
+            "smith protocol failure for [{}]: missing/invalid CMD on all {}/{} heats; smith={}",
+            active_ingot.id,
+            protocol_cmd_fail_count,
+            active_ingot.max.max(1),
+            tui::truncate(smith_hint, 120)
+        )));
+    }
+
     Err(SlagError::IngotCracked(
         active_ingot.id.clone(),
         active_ingot.max,
     ))
+}
+
+fn is_smith_protocol_failure(err: &SlagError) -> bool {
+    match err {
+        SlagError::SmithFailed(msg) => {
+            msg.contains("missing CMD on all") || msg.contains("missing/invalid CMD on all")
+        }
+        _ => false,
+    }
+}
+
+fn is_protocol_placeholder_cmd(cmd: &str) -> bool {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("<shell command") {
+        return true;
+    }
+    if lower.contains("line in response") {
+        return true;
+    }
+    if lower.contains("missing \"cmd:\"") || lower.contains("no cmd") {
+        return true;
+    }
+    if lower.contains("analyze and fix") {
+        return true;
+    }
+    false
 }
 
 fn refresh_ingot_from_crucible(ingot: &mut Ingot) {
@@ -1032,7 +1115,9 @@ fn log_to_file(label: &str, content: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SlagError;
     use crate::sexp::{Ingot, Skill};
+    use crate::smith::mock::MockSmith;
     use tempfile::NamedTempFile;
 
     fn mk_ingot(id: &str, status: Status) -> Ingot {
@@ -1144,5 +1229,52 @@ mod tests {
             crucible.get("bad_forged").expect("bad_forged").status,
             Status::Forged
         );
+    }
+
+    #[test]
+    fn smith_protocol_failure_detector_matches_missing_cmd_signature() {
+        let protocol_err = SlagError::SmithFailed(
+            "smith protocol failure for [i20]: missing/invalid CMD on all 5/5 heats; smith=claude -p"
+                .to_string(),
+        );
+        let other_err = SlagError::SmithFailed("smith invocation failed".to_string());
+
+        assert!(is_smith_protocol_failure(&protocol_err));
+        assert!(!is_smith_protocol_failure(&other_err));
+        assert!(!is_smith_protocol_failure(&SlagError::IngotCracked(
+            "i20".to_string(),
+            5
+        )));
+    }
+
+    #[test]
+    fn protocol_placeholder_cmd_detector_rejects_template_artifacts() {
+        assert!(is_protocol_placeholder_cmd("<shell command to verify>"));
+        assert!(is_protocol_placeholder_cmd(
+            "line in response\n!!! ANALYZE AND FIX !!!"
+        ));
+        assert!(is_protocol_placeholder_cmd("NO CMD: line in response"));
+        assert!(!is_protocol_placeholder_cmd("cargo test --all"));
+        assert!(!is_protocol_placeholder_cmd(
+            "grep -qF 'MENU' src/state/GameStateMachine.js"
+        ));
+    }
+
+    #[tokio::test]
+    async fn strike_ingot_fails_fast_on_protocol_only_cmds() {
+        let mut ingot = mk_ingot("i_proto", Status::Ore);
+        ingot.max = 2;
+        let smith = MockSmith::new(vec![
+            "not following protocol".to_string(),
+            "CMD: line in response\n!!! ANALYZE AND FIX !!!".to_string(),
+        ]);
+
+        let result = strike_ingot(&ingot, &smith, "mock-smith", false, OutputMode::Quiet).await;
+        match result {
+            Err(SlagError::SmithFailed(msg)) => {
+                assert!(msg.contains("missing/invalid CMD on all 2/2 heats"));
+            }
+            other => panic!("expected smith protocol failure, got {other:?}"),
+        }
     }
 }
