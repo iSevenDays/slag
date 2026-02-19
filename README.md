@@ -8,13 +8,13 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.17
+## What's new in v1.3.18
 
-- **No more hanging prompts:** prompt decisions are unified behind `--prompt-policy` plus `--prompt-timeout-secs`.
-- **Clearer control-flow errors:** operator aborts and stale-state aborts now use typed orchestration errors.
-- **Structured run logs:** new event bus with run-scoped traces at `logs/runs/<run_id>/events.jsonl` and optional `--log-format json`.
-- **Independent reviewer lanes:** review now runs `build`, `behavior`, and `risk` lanes with strict `STATUS/EVIDENCE/FIX_INGOTS` contracts.
-- **Prompt repetition (paper-backed):** non-plan smith calls now default to prompt repetition with configurable guardrails (`SLAG_PROMPT_REPEAT_*`).
+- **Release consistency fix:** includes the post-release CI/clippy hotfix so `main` and release behavior are aligned.
+- **Prompt policy + timeouts:** operator prompts are unified behind `--prompt-policy` and `--prompt-timeout-secs` to prevent stalled loops.
+- **Typed orchestration aborts:** explicit `OperatorAbort` and `StateRecoveryAbort` paths for clearer control flow and telemetry.
+- **Structured event logging:** run-scoped event traces at `logs/runs/<run_id>/events.jsonl` with optional `--log-format json`.
+- **Reviewer lanes + prompt repetition defaults:** review runs `build/behavior/risk` lanes with strict schema; non-plan smith calls default to prompt repetition with guardrails.
 
 ## Install
 
