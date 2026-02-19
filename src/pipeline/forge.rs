@@ -552,7 +552,7 @@ fn estimate_reforge_secs(stale_count: usize, max_anvils: usize) -> Option<u64> {
     samples.sort_unstable();
     let median = samples[samples.len() / 2];
     let anvils = max_anvils.max(1);
-    let batches = (stale_count.max(1) + anvils - 1) / anvils;
+    let batches = stale_count.max(1).div_ceil(anvils);
     Some(median.saturating_mul(batches as u64))
 }
 
