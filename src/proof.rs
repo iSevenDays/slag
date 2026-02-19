@@ -1,4 +1,6 @@
 use crate::error::SlagError;
+use std::time::Duration;
+use tokio::time::timeout;
 
 /// Extract `CMD: <command>` from smith response text.
 /// Takes the last CMD: line found (smith may output multiple).
@@ -12,18 +14,39 @@ pub fn extract_cmd(response: &str) -> Option<String> {
 
 /// Run a shell command and return (success, output).
 pub async fn run_shell(cmd: &str) -> (bool, String) {
-    match tokio::process::Command::new("bash")
+    let timeout_secs = std::env::var("SLAG_PROOF_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(120);
+    run_shell_with_timeout(cmd, timeout_secs).await
+}
+
+pub async fn run_shell_with_timeout(cmd: &str, timeout_secs: u64) -> (bool, String) {
+    let mut command = tokio::process::Command::new("bash");
+    command
         .args(["-c", cmd])
-        .output()
-        .await
-    {
-        Ok(output) => {
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => return (false, format!("spawn error: {e}")),
+    };
+
+    match timeout(Duration::from_secs(timeout_secs), child.wait_with_output()).await {
+        Ok(Ok(output)) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
             let combined = format!("{stdout}{stderr}");
             (output.status.success(), combined)
         }
-        Err(e) => (false, format!("spawn error: {e}")),
+        Ok(Err(e)) => (false, format!("wait error: {e}")),
+        Err(_) => (
+            false,
+            format!("timeout after {timeout_secs}s: command did not finish"),
+        ),
     }
 }
 
@@ -99,6 +122,13 @@ mod tests {
     async fn run_shell_failure() {
         let (ok, _) = run_shell("false").await;
         assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn run_shell_timeout() {
+        let (ok, output) = run_shell_with_timeout("sleep 2", 1).await;
+        assert!(!ok);
+        assert!(output.contains("timeout after 1s"));
     }
 
     #[tokio::test]

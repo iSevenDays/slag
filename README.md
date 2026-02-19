@@ -74,7 +74,9 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Main smith for survey/founder/forge |
-| `SLAG_SMITH_OUTCOME` | inherits `SLAG_SMITH` | Independent outcome validator (set this to your fast Sonnet command if desired) |
+| `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
+| `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each validator/recast response before fallback fail path |
+| `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
 
 ## Progress display
 
@@ -215,8 +217,9 @@ Even when all ingots are forged, slag runs an **independent validator pass** to 
 2. **PASS/FAIL decision** -- `PASS` finishes pipeline, `FAIL` must include repair ingots
 3. **Auto-repair loop** -- repair ingots are appended to `PLAN.md` and forged in the next cycle
 4. **Behavior-first proofs** -- validator requires runtime-focused checks (browser/runtime assertions for web/sim apps)
-5. **Format recovery** -- if validator output is malformed (missing `STATUS:`/`TEST:`), slag re-runs validation with a strict recast prompt and fallback TEST inference
-6. **Never dead-stop on format drift** -- if FAIL output omits repair ingots, slag synthesizes a repair ingot so the forge cycle can continue
+5. **Screenshot requirement for web outcomes** -- browser/simulation TEST commands must write a non-empty screenshot artifact to `logs/outcome-smoke.png` (or `$SLAG_OUTCOME_SCREENSHOT`)
+6. **Format recovery** -- if validator output is malformed (missing `STATUS:`/`TEST:`), slag re-runs validation with a strict recast prompt and fallback TEST inference
+7. **Never dead-stop on validator drift/timeouts** -- if validator fails/times out/omits repair ingots, slag falls back to fail-path + synthetic repair ingot so the cycle continues
 
 Disable this closing loop with `--no-outcome`.
 

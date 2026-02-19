@@ -184,8 +184,9 @@ When all ingots are forged, slag runs an independent tester/commenter pass:
 2. **PASS/FAIL** -- PASS ends pipeline; FAIL must include repair ingots
 3. **Auto-repair** -- repair ingots are appended to `PLAN.md` and forged in next cycle
 4. **Behavior-first proofs** -- requires runtime checks, not only file-existence checks
-5. **Format recovery** -- malformed validator output is recast with strict schema; TEST/status may be inferred from structured prose when possible
-6. **Loop continuity** -- when FAIL output has no repair ingots, slag queues a synthetic repair ingot to avoid dead-stop
+5. **Screenshot requirement for web outcomes** -- browser/simulation TEST commands must write a non-empty screenshot artifact to `logs/outcome-smoke.png` (or `$SLAG_OUTCOME_SCREENSHOT`)
+6. **Format recovery** -- malformed validator output is recast with strict schema; TEST/status may be inferred from structured prose when possible
+7. **Loop continuity** -- when validator fails, times out, or returns FAIL without repair ingots, slag queues synthetic repair work to avoid dead-stop
 
 Disable this with `--no-outcome`.
 
@@ -303,7 +304,9 @@ slag uses metallurgical vocabulary.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Base smith command |
-| `SLAG_SMITH_OUTCOME` | inherits `SLAG_SMITH` | Independent outcome validator command (can be a faster model profile) |
+| `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator command (non-interactive by default; override for a specific model/profile) |
+| `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each outcome validator/recast response before fallback fail path |
+| `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
 
 ### Smith Selection
 

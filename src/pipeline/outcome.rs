@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::config::{BLUEPRINT, CRUCIBLE, LEDGER, MAX_ITERATE, ORE_FILE};
 use crate::crucible::{self, Crucible};
@@ -11,6 +12,8 @@ use crate::smith::Smith;
 use crate::tui;
 
 const MAX_REPAIR_INGOTS: usize = 4;
+const DEFAULT_OUTCOME_VALIDATOR_TIMEOUT_SECS: u64 = 180;
+const OUTCOME_SCREENSHOT_PATH: &str = "logs/outcome-smoke.png";
 
 /// Independent closing-loop validation focused on user-visible outcomes.
 /// Returns Ok(true) when outcome passes, Ok(false) when repair ingots were queued.
@@ -29,18 +32,51 @@ pub async fn validate_and_queue(
     let prompt = flux::prepare_outcome_flux(&ore, &blueprint, &crucible, &ledger_tail);
     log_to_file("OUTCOME_PROMPT", &prompt);
     let requires_browser_test = likely_browser_outcome(&ore, &blueprint, &crucible);
+    let validator_timeout_secs = std::env::var("SLAG_OUTCOME_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_OUTCOME_VALIDATOR_TIMEOUT_SECS);
 
     let spinner = tui::spinner("validating outcome...");
-    let response = smith.invoke(&prompt).await.map_err(|e| {
-        spinner.finish_and_clear();
-        SlagError::OutcomeFailed(format!("validator invocation failed: {e}"))
-    })?;
+    let mut recast_allowed = true;
+    let response = match tokio::time::timeout(
+        Duration::from_secs(validator_timeout_secs),
+        smith.invoke(&prompt),
+    )
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(e)) => {
+            recast_allowed = false;
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                &format!("Outcome validator unavailable ({e}); using fallback fail path"),
+            );
+            "STATUS: FAIL\nCOMMENT: outcome validator invocation failed\nTEST:\n".into()
+        }
+        Err(_) => {
+            recast_allowed = false;
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                &format!(
+                    "Outcome validator timed out after {validator_timeout_secs}s; using fallback fail path"
+                ),
+            );
+            "STATUS: FAIL\nCOMMENT: outcome validator timed out\nTEST:\n".into()
+        }
+    };
     spinner.finish_and_clear();
 
     log_to_file("OUTCOME_RAW", &response);
     let mut response = response;
     let mut decision = parse_outcome_response(&response);
     for attempt in 1..=MAX_ITERATE {
+        if !recast_allowed {
+            break;
+        }
         if decision.status_known && !decision.test_cmd.trim().is_empty() {
             break;
         }
@@ -53,10 +89,34 @@ pub async fn validate_and_queue(
             flux::prepare_outcome_recast_flux(&ore, &blueprint, &crucible, &ledger_tail, &response);
         log_to_file(&format!("OUTCOME_RECAST_PROMPT_{attempt}"), &recast_prompt);
         let retry_spinner = tui::spinner("re-validating...");
-        let retry_raw = smith.invoke(&recast_prompt).await.map_err(|e| {
-            retry_spinner.finish_and_clear();
-            SlagError::OutcomeFailed(format!("validator re-cast failed: {e}"))
-        })?;
+        let retry_raw = match tokio::time::timeout(
+            Duration::from_secs(validator_timeout_secs),
+            smith.invoke(&recast_prompt),
+        )
+        .await
+        {
+            Ok(Ok(raw)) => raw,
+            Ok(Err(e)) => {
+                retry_spinner.finish_and_clear();
+                tui::status_line(
+                    "↺",
+                    tui::COLD,
+                    &format!("Outcome format retry failed ({e}); continuing with fallback TEST"),
+                );
+                break;
+            }
+            Err(_) => {
+                retry_spinner.finish_and_clear();
+                tui::status_line(
+                    "↺",
+                    tui::COLD,
+                    &format!(
+                        "Outcome format retry timed out after {validator_timeout_secs}s; continuing with fallback TEST"
+                    ),
+                );
+                break;
+            }
+        };
         retry_spinner.finish_and_clear();
         log_to_file(&format!("OUTCOME_RECAST_RAW_{attempt}"), &retry_raw);
         response = retry_raw;
@@ -103,18 +163,29 @@ pub async fn validate_and_queue(
             "  \x1b[31m✗\x1b[0m outcome TEST must be browser/runtime-aware for web/simulation outcomes"
         );
     }
-    let (test_ok, test_output) = proof::run_shell(&test_cmd).await;
+    if requires_browser_test {
+        let _ = std::fs::remove_file(OUTCOME_SCREENSHOT_PATH);
+    }
+    let test_cmd_to_run = if requires_browser_test {
+        format!("SLAG_OUTCOME_SCREENSHOT=\"{OUTCOME_SCREENSHOT_PATH}\" {test_cmd}")
+    } else {
+        test_cmd.clone()
+    };
+    let (test_ok, test_output) = proof::run_shell(&test_cmd_to_run).await;
+    let screenshot_ok =
+        !requires_browser_test || screenshot_artifact_ok(Path::new(OUTCOME_SCREENSHOT_PATH));
     log_to_file(
         "OUTCOME_TEST",
         &format!(
-            "cmd={}\nexit={}\n{}",
+            "cmd={}\nexec_cmd={}\nexit={}\n{}",
             test_cmd,
+            test_cmd_to_run,
             if test_ok { 0 } else { 1 },
             test_output
         ),
     );
 
-    if decision.passed && test_ok && browser_shape_ok {
+    if decision.passed && test_ok && browser_shape_ok && screenshot_ok {
         println!(
             "  \x1b[1;37m✓\x1b[0m outcome PASS: {}",
             if verbose {
@@ -142,6 +213,12 @@ pub async fn validate_and_queue(
     }
     if requires_browser_test && !browser_shape_ok {
         println!("  \x1b[31m✗\x1b[0m validator TEST did not include browser checks");
+    }
+    if requires_browser_test && !screenshot_ok {
+        println!(
+            "  \x1b[31m✗\x1b[0m outcome screenshot missing at {}",
+            OUTCOME_SCREENSHOT_PATH
+        );
     }
 
     let mut repair_ingots = decision.repair_ingots;
@@ -470,6 +547,12 @@ fn looks_like_browser_test(cmd: &str) -> bool {
         || c.contains("headless")
 }
 
+fn screenshot_artifact_ok(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
+}
+
 fn log_to_file(label: &str, content: &str) {
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = format!("{}/{ts}_{label}.log", crate::config::LOG_DIR);
@@ -479,6 +562,7 @@ fn log_to_file(label: &str, content: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn parse_outcome_pass() {
@@ -597,5 +681,15 @@ TEST: npm test
         assert_eq!(repair.skill, Skill::Web);
         assert_eq!(repair.grade, 3);
         assert_eq!(repair.status, Status::Ore);
+    }
+
+    #[test]
+    fn screenshot_artifact_checking() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("outcome-smoke.png");
+        assert!(!screenshot_artifact_ok(&path));
+
+        std::fs::write(&path, b"png").expect("write");
+        assert!(screenshot_artifact_ok(&path));
     }
 }

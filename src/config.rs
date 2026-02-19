@@ -29,7 +29,9 @@ impl SmithConfig {
         let plan = format!("{base} --permission-mode plan");
         let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
         let web_plan = format!("{web} --permission-mode plan");
-        let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| base.clone());
+        // Outcome validation should be non-interactive and deterministic by default.
+        // Use plan mode unless explicitly overridden by SLAG_SMITH_OUTCOME.
+        let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| plan.clone());
         Self {
             base,
             plan,
