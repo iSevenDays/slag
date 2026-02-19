@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// File paths used by the pipeline
 pub const BLUEPRINT: &str = "BLUEPRINT.md";
@@ -12,6 +12,14 @@ pub const LOG_DIR: &str = "logs";
 pub const MAX_ANVILS: usize = 3;
 pub const HIGH_GRADE: u8 = 3;
 pub const MAX_ITERATE: usize = 3;
+
+const CLAUDE_SMITH_DEFAULT: &str = "claude --dangerously-skip-permissions -p";
+const KIMI_CLAUDE_WRAPPER: &str = "kimi --dangerously-skip-permissions -p";
+const KIMI_NATIVE_WRAPPER: &str =
+    r#"sh -lc 'p=$(cat); kimi --print --prompt "$p" --output-format text'"#;
+const CODEX_WRAPPER: &str = "codex -a never exec --skip-git-repo-check --color never -";
+const GEMINI_WRAPPER: &str = r#"sh -lc 'p=$(cat); gemini -p "$p" --output-format text </dev/null'"#;
+const OPENCODE_WRAPPER: &str = r#"sh -lc 'p=$(cat); opencode -q -p "$p" -f text'"#;
 
 /// Smith configuration resolved from environment
 pub struct SmithConfig {
@@ -32,8 +40,7 @@ pub struct SmithConfig {
 
 impl SmithConfig {
     pub fn from_env() -> Self {
-        let base = std::env::var("SLAG_SMITH")
-            .unwrap_or_else(|_| "claude --dangerously-skip-permissions -p".to_string());
+        let base = parse_non_empty_env("SLAG_SMITH").unwrap_or_else(default_smith_command);
         let plan = format!("{base} --permission-mode plan");
         let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
         let web_plan = format!("{web} --permission-mode plan");
@@ -41,14 +48,7 @@ impl SmithConfig {
         let founder = std::env::var("SLAG_SMITH_FOUNDER").unwrap_or_else(|_| base.clone());
         let review = std::env::var("SLAG_SMITH_REVIEW").unwrap_or_else(|_| base.clone());
         let recovery = std::env::var("SLAG_SMITH_RECOVERY").unwrap_or_else(|_| base.clone());
-        let independent = std::env::var("SLAG_SMITH_INDEPENDENT").ok().and_then(|v| {
-            let trimmed = v.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        });
+        let independent = parse_non_empty_env("SLAG_SMITH_INDEPENDENT");
         // Outcome validation should be non-interactive and deterministic by default.
         // Use plan mode unless explicitly overridden by SLAG_SMITH_OUTCOME.
         let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| plan.clone());
@@ -95,6 +95,103 @@ impl SmithConfig {
     }
 }
 
+fn parse_non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn default_smith_command() -> String {
+    auto_detect_smith_command().unwrap_or_else(|| CLAUDE_SMITH_DEFAULT.to_string())
+}
+
+fn auto_detect_smith_command() -> Option<String> {
+    let kimi_native = resolve_command_path("kimi")
+        .as_deref()
+        .map(is_native_kimi_cli)
+        .unwrap_or(false);
+    choose_detected_smith(|cmd| resolve_command_path(cmd).is_some(), kimi_native)
+}
+
+fn choose_detected_smith<F>(mut has_cmd: F, kimi_native: bool) -> Option<String>
+where
+    F: FnMut(&str) -> bool,
+{
+    if has_cmd("kimi") {
+        let cmd = if kimi_native {
+            KIMI_NATIVE_WRAPPER
+        } else {
+            KIMI_CLAUDE_WRAPPER
+        };
+        return Some(cmd.to_string());
+    }
+    if has_cmd("codex") {
+        return Some(CODEX_WRAPPER.to_string());
+    }
+    if has_cmd("gemini") {
+        return Some(GEMINI_WRAPPER.to_string());
+    }
+    if has_cmd("opencode") {
+        return Some(OPENCODE_WRAPPER.to_string());
+    }
+    if has_cmd("claude") {
+        return Some(CLAUDE_SMITH_DEFAULT.to_string());
+    }
+    None
+}
+
+fn resolve_command_path(command: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = dir.join(command);
+        if is_executable(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn is_native_kimi_cli(path: &Path) -> bool {
+    let mut current = path.to_path_buf();
+    for _ in 0..4 {
+        if current
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .contains("kimi-cli")
+        {
+            return true;
+        }
+        let Ok(link) = std::fs::read_link(&current) else {
+            break;
+        };
+        current = if link.is_absolute() {
+            link
+        } else {
+            current.parent().unwrap_or_else(|| Path::new("")).join(link)
+        };
+    }
+    false
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.is_file() && (meta.permissions().mode() & 0o111) != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|meta| meta.is_file())
+        .unwrap_or(false)
+}
+
 fn parse_confidence(name: &str, default: f32) -> f32 {
     std::env::var(name)
         .ok()
@@ -129,6 +226,41 @@ pub struct PipelineConfig {
     pub verbose: bool,
     /// Run independent outcome-validation closing loop
     pub outcome_gate: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detected_smith_prefers_native_kimi_first() {
+        let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", true);
+        assert_eq!(selected, Some(KIMI_NATIVE_WRAPPER.to_string()));
+    }
+
+    #[test]
+    fn detected_smith_prefers_kimi_claude_wrapper_when_non_native() {
+        let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", false);
+        assert_eq!(selected, Some(KIMI_CLAUDE_WRAPPER.to_string()));
+    }
+
+    #[test]
+    fn detected_smith_prefers_codex_before_claude() {
+        let selected = choose_detected_smith(|cmd| cmd == "codex" || cmd == "claude", false);
+        assert_eq!(selected, Some(CODEX_WRAPPER.to_string()));
+    }
+
+    #[test]
+    fn detected_smith_falls_back_to_claude() {
+        let selected = choose_detected_smith(|cmd| cmd == "claude", false);
+        assert_eq!(selected, Some(CLAUDE_SMITH_DEFAULT.to_string()));
+    }
+
+    #[test]
+    fn detected_smith_none_when_no_commands_available() {
+        let selected = choose_detected_smith(|_| false, false);
+        assert_eq!(selected, None);
+    }
 }
 
 impl PipelineConfig {

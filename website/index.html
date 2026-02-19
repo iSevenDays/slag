@@ -27,7 +27,7 @@
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "slag",
-      "description": "Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via Claude with strict recovery contracts, independent fallback lanes, and proof-based verification.",
+      "description": "Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with strict recovery contracts, independent fallback lanes, and proof-based verification.",
       "url": "https://slag.dev",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux",
@@ -41,10 +41,10 @@
         "name": "sliday",
         "url": "https://github.com/sliday"
       },
-      "softwareVersion": "1.3.12",
+      "softwareVersion": "1.3.13",
       "codeRepository": "https://github.com/sliday/slag",
       "programmingLanguage": ["Rust", "Bash"],
-      "keywords": ["AI", "task orchestrator", "Claude", "automation", "developer tools"]
+      "keywords": ["AI", "task orchestrator", "developer tools", "claude", "codex", "gemini", "kimi", "opencode"]
     }
     </script>
   </head>
@@ -95,7 +95,7 @@
         <!-- Logo - div instead of pre (no gray bg) -->
         <div class="hero-logo"><span style="color: var(--slag-cold);">░░░</span><span style="color: var(--slag-warm);">▒</span><span style="color: var(--slag-hot);">▒</span><span style="color: var(--slag-bright);">▓</span><span style="color: var(--slag-pure);">█</span>  <span style="color: var(--slag-pure); font-weight: bold;">SLAG</span>  <span style="color: var(--slag-pure);">█</span><span style="color: var(--slag-bright);">▓</span><span style="color: var(--slag-hot);">▒</span><span style="color: var(--slag-warm);">▒</span><span style="color: var(--slag-cold);">░░░</span></div>
         <p style="color: var(--slag-pure); margin-top: 1lh; font-size: 1.1rem; font-weight: bold; text-align: center; position: relative; z-index: 1;">Smelt ideas, skim the bugs, forge the product.</p>
-        <p style="margin-top: 0.5lh; color: var(--foreground1); text-align: center; position: relative; z-index: 1;">Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via Claude agents with strict retry contracts, independent fallback lanes, and proof-based verification.</p>
+        <p style="margin-top: 0.5lh; color: var(--foreground1); text-align: center; position: relative; z-index: 1;">Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with strict retry contracts, independent fallback lanes, and proof-based verification.</p>
         <div class="temp-bar workflow-bar" style="margin-top: 1.5lh; text-align: center; position: relative; z-index: 1;">
           <span class="workflow-item workflow-ore"><span style="color: var(--slag-cold);">🧱</span> ore</span>
           <span class="workflow-arrow">→</span>
@@ -153,7 +153,7 @@ EOF</code>
             <code data-copy>slag "Build the REST API from PRD.md"</code>
           </div>
         </div>
-        <p class="disclaimer"><span style="color: var(--slag-warm);">&#x26A0;</span> slag gives Claude autonomous shell access. Use in a dedicated directory or container.</p>
+        <p class="disclaimer"><span style="color: var(--slag-warm);">&#x26A0;</span> slag gives the configured smith autonomous shell access. Use in a dedicated directory or container.</p>
       </section>
 
       <div is="separator"></div>
@@ -197,7 +197,7 @@ EOF</code>
     |  grade >= 3   --> plan mode
     |  default      --> base tools
     v
- <span style="color:var(--slag-hot);">STRIKE</span> (claude invocation)
+ <span style="color:var(--slag-hot);">STRIKE</span> (smith invocation)
     |
     v
  <span style="color:var(--slag-cold);">CMD</span> (extract & run shell command)
@@ -250,7 +250,7 @@ EOF</code>
               <span is="badge" class="forged phase-num">3</span>
               <span class="phase-name">FORGE</span>
             </div>
-            <p class="phase-desc">Strikes each ingot via Claude. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.</p>
+            <p class="phase-desc">Strikes each ingot via the configured smith. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.</p>
           </div>
           <div class="phase-card" box="square">
             <div>
@@ -332,7 +332,7 @@ EOF</code>
 
         <details box="square">
           <summary>Do I need Claude CLI installed?</summary>
-          <p>Yes. slag invokes <code>claude</code> via CLI. Install it from <a href="https://docs.anthropic.com/en/docs/claude-code">docs.anthropic.com</a> and ensure it's in your PATH.</p>
+          <p>Not for the Rust binary. It auto-detects the first available supported smith CLI (<code>kimi</code>, <code>codex</code>, <code>gemini</code>, <code>opencode</code>, then <code>claude</code>) unless you set <code>SLAG_SMITH</code> explicitly. The legacy bash script still expects Claude CLI.</p>
         </details>
       </section>
 

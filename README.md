@@ -4,16 +4,16 @@
 
 **Smelt ideas, skim the bugs, forge the product.**
 
-A task orchestrator for AI-powered development. Give it a product requirement, and it breaks it into verifiable tasks, executes them via Claude, and proves each one passed before moving on.
+A task orchestrator for AI-powered development. Give it a product requirement, and it breaks it into verifiable tasks, executes them via a configured smith CLI, and proves each one passed before moving on.
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.12
+## What's new in v1.3.13
 
-- **Better retry quality:** re-smelt/reconsider outputs must change approach, keep concrete proofs, and avoid previously failed proof signatures.
-- **Independent recovery lane:** set `SLAG_SMITH_INDEPENDENT` to run a separate fallback smith when primary repair output is rejected.
-- **No stale retry loops:** forge refreshes ingot `:work`/`:proof` from `PLAN.md` before each heat.
-- **Safer proof parsing:** quoted backslashes/quotes now round-trip cleanly in S-expression parser/writer.
+- **Auto smith detection:** when `SLAG_SMITH` is unset, slag now picks the first available CLI in this order: `kimi`, `codex`, `gemini`, `opencode`, then `claude`.
+- **Kimi compatibility mode:** slag detects native Kimi CLI and uses `kimi --print`; Claude-compatible Kimi wrappers still work automatically.
+- **Cleaner env handling:** empty `SLAG_SMITH*` values are treated as unset, reducing misconfiguration issues.
+- **Routing tests added:** smith selection priority and fallback behavior are now covered by unit tests.
 
 ## Install
 
@@ -80,7 +80,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Main smith for survey/founder/forge |
+| `SLAG_SMITH` | auto-detected (`kimi`/`codex`/`gemini`/`opencode`/`claude`) | Main smith for survey/founder/forge |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
@@ -94,6 +94,9 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each validator/recast response before fallback fail path |
 | `SLAG_SUBAGENT_TIMEOUT_SECS` | `90` | Max seconds for each subagent fallback invocation |
 | `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
+
+When `SLAG_SMITH` is unset, slag picks the first available smith in this order:
+`kimi` (native Kimi CLI uses print-mode wrapper), `codex`, `gemini`, `opencode`, then `claude`.
 
 ## Progress display
 
@@ -127,7 +130,7 @@ slag uses metallurgical vocabulary. Here's the dictionary.
 | **Crucible** | The file holding all ingots | `PLAN.md` |
 | **Blueprint** | Architecture analysis and forging plan | `BLUEPRINT.md` |
 | **Anvil** | A parallel execution slot (background process) | In-memory |
-| **Smith** | The AI agent that does the work (Claude) | Claude CLI invocation |
+| **Smith** | The AI agent that does the work (configured smith CLI) | CLI invocation |
 | **Slag heap** | Debug logs dumped during forging | `logs/` directory |
 | **Heat** | One attempt at forging an ingot (retry count) | `:heat` field |
 | **Grade** | Complexity rating (1-5); high grade = plan mode | `:grade` field |
@@ -143,7 +146,7 @@ slag uses metallurgical vocabulary. Here's the dictionary.
 | **Survey** | Analyze requirements, produce blueprint | Phase 1 |
 | **Found** | Design and cast ingots from blueprint | Phase 2 |
 | **Forge** | Execute an ingot: strike, run commands, verify | Phase 3 |
-| **Strike** | Send work to the smith (Claude) and get output | Phase 3 |
+| **Strike** | Send work to the smith and get output | Phase 3 |
 | **Smelt** | Process raw ore into workable material | Phase 3 |
 | **Re-smelt** | Analyze a cracked ingot and rewrite/split it | Phase 3 (recovery) |
 | **Reconsider** | Rethink a twice-cracked ingot's fundamental approach | Phase 3 (recovery) |
@@ -179,7 +182,7 @@ PRD.md --> SURVEYOR --> FOUNDER --> FORGE (branches) --> REVIEW --> OUTCOME --> 
 
 ### Phase 1: Surveyor
 
-Reads `PRD.md` and produces `BLUEPRINT.md` -- architecture decisions, dependency graph, risk assessment, and forging sequence. Uses Claude's plan mode.
+Reads `PRD.md` and produces `BLUEPRINT.md` -- architecture decisions, dependency graph, risk assessment, and forging sequence. Uses smith plan mode.
 
 ### Phase 2: Founder
 
@@ -198,8 +201,8 @@ The parser also extracts multiline/wrapped `(ingot ...)` expressions from mixed 
 The main loop. For each ingot:
 
 1. **Pick** the next ore-status ingot
-2. **Strike** -- invoke Claude with the task, context, and skill tools
-3. **Run** -- extract and execute shell commands from Claude's output
+2. **Strike** -- invoke the smith with the task, context, and skill tools
+3. **Run** -- extract and execute shell commands from smith output
 4. **Proof** -- run the `:proof` command; exit 0 = forged, non-zero = retry
 
 Independent ingots (`:solo t`) run on parallel anvils. Sequential ingots (`:solo nil`) run one at a time.
@@ -314,7 +317,7 @@ example/                # Real slag run outputs
 
 ## Requirements
 
-- **Rust binary**: Claude CLI (`claude` in PATH)
+- **Rust binary**: one supported smith CLI in PATH (`claude`, `kimi`, `codex`, `gemini`, or `opencode`)
 - **Bash version**: bash 4+, Claude CLI, curl, sed, awk
 - **Optional**: Playwright (for `:skill web` ingots)
 
@@ -324,4 +327,4 @@ MIT
 
 ## Warning
 
-slag gives Claude autonomous shell access. It will create files, install packages, and run commands without asking. Use in a dedicated directory or container.
+slag gives the configured smith autonomous shell access. It will create files, install packages, and run commands without asking. Use in a dedicated directory or container.

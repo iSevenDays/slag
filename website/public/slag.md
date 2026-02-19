@@ -2,14 +2,14 @@
 
 > Smelt ideas, skim the bugs, forge the product.
 
-Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via Claude agents with automatic retry, re-smelt recovery, and proof-based verification.
+Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.12
+## What's new in v1.3.13
 
-- Better retry quality: recovery outputs must change approach and avoid failed proof signatures.
-- Optional independent fallback lane: set `SLAG_SMITH_INDEPENDENT` for re-smelt/reconsider escalation.
-- Forge now refreshes ingot `:work`/`:proof` from `PLAN.md` before each heat to avoid stale loops.
-- Safer S-expression escaping for proof commands with backslashes/quotes.
+- Auto smith detection: if `SLAG_SMITH` is unset, slag picks the first available CLI in this order: `kimi`, `codex`, `gemini`, `opencode`, then `claude`.
+- Better Kimi handling: native Kimi CLI uses `--print`, while Claude-compatible Kimi wrappers still work automatically.
+- Cleaner env parsing: empty `SLAG_SMITH*` values are treated as unset.
+- Added unit tests for smith selection priority and fallback behavior.
 
 ## Install
 
@@ -36,7 +36,7 @@ EOF
 slag "Build the REST API from PRD.md"
 ```
 
-> **Warning:** slag gives Claude autonomous shell access. Use in a dedicated directory or container.
+> **Warning:** slag gives the configured smith autonomous shell access. Use in a dedicated directory or container.
 
 ## Pipeline
 
@@ -72,7 +72,7 @@ slag "Build the REST API from PRD.md"
     |  grade >= 3   --> plan mode
     |  default      --> base tools
     v
- STRIKE (claude invocation)
+ STRIKE (smith invocation)
     |
     v
  CMD (extract & run shell command)
@@ -102,7 +102,7 @@ If the model returns wrappers/prose instead of ingot lines, slag automatically r
 Multiline/wrapped `(ingot ...)` expressions are now parsed from mixed output to avoid false zero-ingot failures.
 
 ### 3. FORGE
-Strikes each ingot via Claude. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.
+Strikes each ingot via the configured smith. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.
 
 Default forge output is compact for readability. Use `--verbose` for detailed per-heat logs and longer Surveyor/Founder previews.
 
@@ -155,7 +155,7 @@ Run `slag update` to self-update to the latest release. This downloads the new b
 The Rust binary is faster, has better error handling, and includes self-update. The bash script is a single file with no build step — useful if you can't install Rust or want to inspect/modify the orchestrator directly.
 
 ### Do I need Claude CLI installed?
-Yes. slag invokes `claude` via CLI. Install it from [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) and ensure it's in your PATH.
+Not for the Rust binary. It auto-detects the first available supported smith CLI (`kimi`, `codex`, `gemini`, `opencode`, then `claude`) unless you set `SLAG_SMITH` explicitly. The legacy bash script still expects Claude CLI.
 
 ## Ingot S-Expression Format
 
