@@ -8,6 +8,13 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.12
+
+- **Better retry quality:** re-smelt/reconsider outputs must change approach, keep concrete proofs, and avoid previously failed proof signatures.
+- **Independent recovery lane:** set `SLAG_SMITH_INDEPENDENT` to run a separate fallback smith when primary repair output is rejected.
+- **No stale retry loops:** forge refreshes ingot `:work`/`:proof` from `PLAN.md` before each heat.
+- **Safer proof parsing:** quoted backslashes/quotes now round-trip cleanly in S-expression parser/writer.
+
 ## Install
 
 **Binary** (recommended):
@@ -79,6 +86,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
 | `SLAG_SMITH_RECOVERY` | `SLAG_SMITH` | Override model/flags for analysis/re-smelt/reconsider phases |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
+| `SLAG_SMITH_INDEPENDENT` | unset (disabled) | Optional independent fallback smith for recovery escalation after rejected re-smelt/reconsider output |
 | `SLAG_SMITH_SUBAGENT` | `npx -y @anthropic-ai/claude-code -p` | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
 | `SLAG_CONFIDENCE_THRESHOLD` | `0.65` | Global default threshold for uncertainty escalation |
 | `SLAG_FOUNDER_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Founder-specific escalation threshold |
@@ -212,9 +220,11 @@ When ingots crack, slag analyzes failures and can retry automatically (up to `--
 
 1. **Failure detection** -- identifies patterns: missing dependencies, protocol failures, proof mismatches, JSON errors
 2. **Fix application** -- converts parallel ingots to sequential if they have dependencies
-3. **Regeneration** -- uses founder to regenerate ingots that can't be fixed simply
-4. **Retry** -- re-runs forge with fixed/regenerated ingots
-5. **Force retry prompt** -- when no recoverable ingots found, asks user to confirm force retry
+3. **Strict retry contract** -- repaired ingots must change approach, keep concrete proofs, and avoid failed proof signatures
+4. **Independent fallback lane** -- optional escalation to `SLAG_SMITH_INDEPENDENT` if primary repair output is rejected
+5. **Regeneration** -- uses founder to regenerate ingots that can't be fixed simply
+6. **Retry** -- re-runs forge with fixed/regenerated ingots
+7. **Force retry prompt** -- when no recoverable ingots found, asks user to confirm force retry
 
 This loop continues until all ingots forge, max retries exhausted, or user declines force retry.
 

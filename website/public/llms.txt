@@ -52,7 +52,7 @@ slag update    # Self-update
 | --no-outcome | Disable independent outcome-validation closing loop |
 
 Default output is compact for readability; use `--verbose` for full per-heat details.
-Phase-specific routing is available via `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, `SLAG_SMITH_RECOVERY`, and `SLAG_SMITH_OUTCOME` (default non-interactive plan mode). `SLAG_CONFIDENCE_THRESHOLD` (or founder/outcome-specific overrides), `SLAG_OUTCOME_TIMEOUT_SECS`, `SLAG_PROOF_TIMEOUT_SECS`, and `SLAG_SMITH_SUBAGENT`/`SLAG_SUBAGENT_TIMEOUT_SECS` bound and recover low-confidence cases.
+Phase-specific routing is available via `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, `SLAG_SMITH_RECOVERY`, and `SLAG_SMITH_OUTCOME` (default non-interactive plan mode). Recovery can optionally escalate to `SLAG_SMITH_INDEPENDENT` after rejected re-smelt output. `SLAG_CONFIDENCE_THRESHOLD` (or founder/outcome-specific overrides), `SLAG_OUTCOME_TIMEOUT_SECS`, `SLAG_PROOF_TIMEOUT_SECS`, and `SLAG_SMITH_SUBAGENT`/`SLAG_SUBAGENT_TIMEOUT_SECS` bound and recover low-confidence cases.
 
 ## Pipeline
 
@@ -65,7 +65,8 @@ PRD.md → SURVEYOR → FOUNDER → FORGE → [REVIEW] → OUTCOME → ASSAY →
 3. **Forge**: Execute ingots via Claude, verify with proof commands
 4. **Review**: (--worktree) CI checks + AI review before merge
 5. **Outcome**: Independent validator checks user-visible behavior, uses deterministic web smoke fallback + optional subagent escalation on uncertainty, and auto-recasts/fallbacks so repair loop still continues
-6. **Assay**: Final report
+6. **Recovery guardrails**: Re-smelt/reconsider outputs must change approach, keep concrete proofs, and avoid previously failed proof signatures
+7. **Assay**: Final report
 
 ## Ingot Format
 

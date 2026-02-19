@@ -3,9 +3,12 @@ use super::Ingot;
 /// Serialize an Ingot back to its s-expression string representation.
 pub fn write_ingot(ingot: &Ingot) -> String {
     let solo = if ingot.solo { "t" } else { "nil" };
+    let id = escape_quoted(&ingot.id);
+    let proof = escape_quoted(&ingot.proof);
+    let work = escape_quoted(&ingot.work);
     let mut s = format!(
         "(ingot :id \"{}\" :status {} :solo {} :grade {} :skill {} :heat {} :max {} :smelt {} :proof \"{}\" :work \"{}\"",
-        ingot.id,
+        id,
         ingot.status,
         solo,
         ingot.grade,
@@ -13,15 +16,15 @@ pub fn write_ingot(ingot: &Ingot) -> String {
         ingot.heat,
         ingot.max,
         ingot.smelt,
-        ingot.proof,
-        ingot.work,
+        proof,
+        work,
     );
 
     // Append unknown extra fields for forward compatibility
     for (key, value) in &ingot.extra {
         // If value looks like it needs quoting (contains spaces), quote it
         if value.contains(' ') || value.contains('"') {
-            s.push_str(&format!(" :{key} \"{value}\""));
+            s.push_str(&format!(" :{key} \"{}\"", escape_quoted(value)));
         } else {
             s.push_str(&format!(" :{key} {value}"));
         }
@@ -29,6 +32,21 @@ pub fn write_ingot(ingot: &Ingot) -> String {
 
     s.push(')');
     s
+}
+
+fn escape_quoted(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -99,5 +117,25 @@ mod tests {
         };
         let s = write_ingot(&ingot);
         assert!(s.contains(":custom hello"));
+    }
+
+    #[test]
+    fn write_escapes_quotes_and_backslashes() {
+        let ingot = Ingot {
+            id: "i1".into(),
+            status: Status::Ore,
+            solo: true,
+            grade: 1,
+            skill: Skill::Default,
+            heat: 0,
+            max: 5,
+            smelt: 0,
+            proof: "grep -q 'A\\|B'".into(),
+            work: "He said \"ok\"".into(),
+            extra: vec![],
+        };
+        let s = write_ingot(&ingot);
+        assert!(s.contains("A\\\\|B"));
+        assert!(s.contains("He said \\\"ok\\\""));
     }
 }

@@ -125,11 +125,11 @@ fn parse_fields(s: &str) -> Vec<(String, String)> {
                     i += 1;
                 }
             }
-            let val: String = chars[val_start..i].iter().collect();
+            let raw: String = chars[val_start..i].iter().collect();
             if i < len {
                 i += 1; // skip closing quote
             }
-            val
+            unescape_quoted(&raw)
         } else {
             let val_start = i;
             while i < len && !chars[i].is_whitespace() && chars[i] != ')' {
@@ -142,6 +142,32 @@ fn parse_fields(s: &str) -> Vec<(String, String)> {
     }
 
     fields
+}
+
+fn unescape_quoted(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+
+    out
 }
 
 /// Parse all ingot lines from a crucible file's content.
@@ -362,5 +388,13 @@ All done.
         assert_eq!(ingots[0].id, "i1");
         assert_eq!(ingots[1].id, "i2");
         assert!(!ingots[1].solo);
+    }
+
+    #[test]
+    fn parse_unescapes_quoted_sequences() {
+        let line = r#"(ingot :id "i1" :status ore :solo t :grade 1 :skill default :heat 0 :max 5 :smelt 0 :proof "grep -q 'A\\|B'" :work "He said \"ok\"")"#;
+        let ingot = parse_ingot(line).unwrap();
+        assert_eq!(ingot.proof, "grep -q 'A\\|B'");
+        assert_eq!(ingot.work, "He said \"ok\"");
     }
 }

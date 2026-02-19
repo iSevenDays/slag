@@ -24,6 +24,7 @@ pub struct SmithConfig {
     pub review: String,
     pub recovery: String,
     pub outcome: String,
+    pub independent: Option<String>,
     pub confidence_threshold: f32,
     pub founder_confidence_threshold: f32,
     pub outcome_confidence_threshold: f32,
@@ -40,6 +41,14 @@ impl SmithConfig {
         let founder = std::env::var("SLAG_SMITH_FOUNDER").unwrap_or_else(|_| base.clone());
         let review = std::env::var("SLAG_SMITH_REVIEW").unwrap_or_else(|_| base.clone());
         let recovery = std::env::var("SLAG_SMITH_RECOVERY").unwrap_or_else(|_| base.clone());
+        let independent = std::env::var("SLAG_SMITH_INDEPENDENT").ok().and_then(|v| {
+            let trimmed = v.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        });
         // Outcome validation should be non-interactive and deterministic by default.
         // Use plan mode unless explicitly overridden by SLAG_SMITH_OUTCOME.
         let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| plan.clone());
@@ -58,6 +67,7 @@ impl SmithConfig {
             review,
             recovery,
             outcome,
+            independent,
             confidence_threshold,
             founder_confidence_threshold,
             outcome_confidence_threshold,

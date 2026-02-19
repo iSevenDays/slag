@@ -46,6 +46,10 @@ pub async fn run(
     pipeline_config: &PipelineConfig,
 ) -> Result<Vec<ForgeResult>, SlagError> {
     let mut forged_results: Vec<ForgeResult> = Vec::new();
+    let independent_smith = config
+        .independent
+        .as_ref()
+        .map(|cmd| ClaudeSmith::new(cmd.clone()));
     let use_worktree = pipeline_config.worktree;
     let max_anvils = pipeline_config.max_anvils;
     let sequential_output_mode = if pipeline_config.verbose {
@@ -140,9 +144,14 @@ pub async fn run(
                         }
                         if let Some(ingot) = crucible.get(&id).cloned() {
                             let smith = ClaudeSmith::new(config.recovery.clone());
-                            if resmelt::resmelt_ingot(&mut crucible, &ingot, &smith)
-                                .await
-                                .is_ok()
+                            if resmelt::resmelt_ingot(
+                                &mut crucible,
+                                &ingot,
+                                &smith,
+                                independent_smith.as_ref().map(|s| s as &dyn Smith),
+                            )
+                            .await
+                            .is_ok()
                             {
                                 crucible.save()?;
                                 println!("  \x1b[38;5;220m♻\x1b[0m [{}] re-smelted and queued", id);
@@ -206,9 +215,14 @@ pub async fn run(
                     ingot.heat = heat_used;
                 }
                 let recovery_smith = ClaudeSmith::new(config.recovery.clone());
-                if resmelt::resmelt_ingot(&mut crucible, &ingot, &recovery_smith)
-                    .await
-                    .is_ok()
+                if resmelt::resmelt_ingot(
+                    &mut crucible,
+                    &ingot,
+                    &recovery_smith,
+                    independent_smith.as_ref().map(|s| s as &dyn Smith),
+                )
+                .await
+                .is_ok()
                 {
                     // Re-smelted: status already updated by resmelt
                     crucible.save()?;
@@ -237,6 +251,7 @@ async fn strike_ingot(
 ) -> Result<ForgeResult, SlagError> {
     let mut slag: Option<String> = None;
     let mut worktree_path: Option<String> = None;
+    let mut active_ingot = ingot.clone();
     let branch_name = format!("forge/{}", ingot.id);
 
     // Create worktree if in worktree mode
@@ -263,14 +278,14 @@ async fn strike_ingot(
     if !output_mode.is_quiet() {
         println!(
             "\n  \x1b[38;5;208m▣\x1b[0m \x1b[1;37m[{}]\x1b[0m {}{}{}",
-            ingot.id,
-            tui::truncate(&ingot.work, 42),
-            if ingot.is_complex() {
+            active_ingot.id,
+            tui::truncate(&active_ingot.work, 42),
+            if active_ingot.is_complex() {
                 " \x1b[38;5;220m◉\x1b[0m"
             } else {
                 ""
             },
-            if ingot.is_web() {
+            if active_ingot.is_web() {
                 " \x1b[38;5;208m⚡\x1b[0m"
             } else {
                 ""
@@ -279,14 +294,19 @@ async fn strike_ingot(
         if output_mode.is_verbose() {
             println!(
                 "    \x1b[90mgr:{} skill:{} proof:{}\x1b[0m",
-                ingot.grade,
-                ingot.skill,
-                tui::truncate(&ingot.proof, 30),
+                active_ingot.grade,
+                active_ingot.skill,
+                tui::truncate(&active_ingot.proof, 30),
             );
         }
     }
 
     for heat in 1..=ingot.max {
+        // Re-read the ingot before each heat so retries use the latest proof/work.
+        // This prevents stale forge orders when PLAN.md was updated in a prior heat.
+        refresh_ingot_from_crucible(&mut active_ingot);
+        let heat_max = active_ingot.max.max(1);
+
         if output_mode.is_verbose() {
             let hc = match heat {
                 1..=2 => "\x1b[31m",
@@ -296,20 +316,20 @@ async fn strike_ingot(
             };
             print!(
                 "    {hc}{} {heat}/{}\x1b[0m ",
-                tui::heat_bar(heat, ingot.max),
-                ingot.max
+                tui::heat_bar(heat, heat_max),
+                heat_max
             );
         }
 
-        let flux_text = flux::prepare_flux(ingot, slag.as_deref());
-        log_to_file(&format!("FLUX_{}_{heat}", ingot.id), &flux_text);
+        let flux_text = flux::prepare_flux(&active_ingot, slag.as_deref());
+        log_to_file(&format!("FLUX_{}_{heat}", active_ingot.id), &flux_text);
 
         let spinner = if output_mode.is_quiet() {
             None
         } else {
-            let spinner_msg = if output_mode.is_verbose() && ingot.is_complex() {
+            let spinner_msg = if output_mode.is_verbose() && active_ingot.is_complex() {
                 "planning..."
-            } else if output_mode.is_verbose() && ingot.is_web() {
+            } else if output_mode.is_verbose() && active_ingot.is_web() {
                 "web forging..."
             } else {
                 "forging..."
@@ -340,14 +360,14 @@ async fn strike_ingot(
                     if output_mode.is_verbose() {
                         println!("\x1b[31m✗\x1b[0m");
                     } else {
-                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
                     }
                 }
                 continue;
             }
         };
 
-        log_to_file(&format!("STRIKE_{}_{heat}", ingot.id), &response);
+        log_to_file(&format!("STRIKE_{}_{heat}", active_ingot.id), &response);
 
         // Extract CMD
         let cmd = match proof::extract_cmd(&response) {
@@ -358,7 +378,7 @@ async fn strike_ingot(
                     if output_mode.is_verbose() {
                         println!("\x1b[31m✗\x1b[0m smith output missing \"CMD:\" line");
                     } else {
-                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
                     }
                 }
                 continue;
@@ -377,28 +397,34 @@ async fn strike_ingot(
             proof::run_shell(&cmd).await
         };
         log_to_file(
-            &format!("ASSAY_{}_{heat}", ingot.id),
+            &format!("ASSAY_{}_{heat}", active_ingot.id),
             &format!("exit={}\n{output}", if ok { 0 } else { 1 }),
         );
 
         if ok {
             // Verify proof if different from cmd
-            if !ingot.proof.is_empty() && ingot.proof != cmd && ingot.proof != "true" {
+            if !active_ingot.proof.is_empty()
+                && active_ingot.proof != cmd
+                && active_ingot.proof != "true"
+            {
                 let (proof_ok, proof_output) = if let Some(ref wt_path) = worktree_path {
-                    run_shell_in_dir(&ingot.proof, wt_path).await
+                    run_shell_in_dir(&active_ingot.proof, wt_path).await
                 } else {
-                    proof::run_shell(&ingot.proof).await
+                    proof::run_shell(&active_ingot.proof).await
                 };
                 if !proof_ok {
-                    slag = Some(format!("Proof failed [{}]: {proof_output}", ingot.proof));
+                    slag = Some(format!(
+                        "Proof failed [{}]: {proof_output}",
+                        active_ingot.proof
+                    ));
                     if !output_mode.is_quiet() {
                         if output_mode.is_verbose() {
                             println!(
                                 "\x1b[31m✗\x1b[0m proof failed: {} (exit 1)",
-                                tui::truncate(&ingot.proof, 30)
+                                tui::truncate(&active_ingot.proof, 30)
                             );
                         } else {
-                            println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                            println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
                         }
                     }
                     continue;
@@ -409,20 +435,20 @@ async fn strike_ingot(
                 if output_mode.is_verbose() {
                     println!("\x1b[1;37m█\x1b[0m");
                 } else {
-                    println!("    \x1b[1;37m✓\x1b[0m forged (heat {heat}/{})", ingot.max);
+                    println!("    \x1b[1;37m✓\x1b[0m forged (heat {heat}/{})", heat_max);
                 }
             }
 
             // Commit in worktree or main repo
             if let Some(ref wt_path) = worktree_path {
-                git_commit_in_dir(&ingot.id, &ingot.work, wt_path).await;
+                git_commit_in_dir(&active_ingot.id, &active_ingot.work, wt_path).await;
             } else {
-                proof::git_commit(&ingot.id, &ingot.work).await;
+                proof::git_commit(&active_ingot.id, &active_ingot.work).await;
             }
 
-            append_ledger(ingot, heat);
+            append_ledger(&active_ingot, heat);
             return Ok(ForgeResult {
-                id: ingot.id.clone(),
+                id: active_ingot.id.clone(),
                 branch: if worktree_mode {
                     Some(branch_name)
                 } else {
@@ -437,7 +463,7 @@ async fn strike_ingot(
                 if output_mode.is_verbose() {
                     println!("\x1b[31m✗\x1b[0m");
                 } else {
-                    println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", ingot.max);
+                    println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
                 }
             }
         }
@@ -445,10 +471,27 @@ async fn strike_ingot(
 
     // Clean up worktree on failure (preserve branch for debugging)
     if worktree_path.is_some() {
-        worktree::cleanup_without_merge(&ingot.id).await;
+        worktree::cleanup_without_merge(&active_ingot.id).await;
     }
 
-    Err(SlagError::IngotCracked(ingot.id.clone(), ingot.max))
+    Err(SlagError::IngotCracked(
+        active_ingot.id.clone(),
+        active_ingot.max,
+    ))
+}
+
+fn refresh_ingot_from_crucible(ingot: &mut Ingot) {
+    if let Ok(crucible) = Crucible::load(Path::new(CRUCIBLE)) {
+        if let Some(latest) = crucible.get(&ingot.id) {
+            ingot.work = latest.work.clone();
+            ingot.proof = latest.proof.clone();
+            ingot.grade = latest.grade;
+            ingot.skill = latest.skill.clone();
+            ingot.max = latest.max;
+            ingot.smelt = latest.smelt;
+            ingot.extra = latest.extra.clone();
+        }
+    }
 }
 
 /// Invoke smith in a specific directory (worktree)

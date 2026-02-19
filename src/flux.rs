@@ -116,6 +116,9 @@ pub fn prepare_resmelt_flux(ingot: &Ingot, failure_logs: &str) -> String {
         IMPOSSIBLE: reason\n\n\
         RULES:\n\
         - ALL rewritten/split ingots MUST have :smelt 1\n\
+        - You MUST change :work or :proof from the cracked ingot (different approach)\n\
+        - Do NOT reuse a proof command pattern that already failed in FAILURE LOGS\n\
+        - Every output ingot must have :status ore and a concrete non-empty :proof\n\
         - Fix the ROOT CAUSE, do not just retry the same thing\n\
         - If proof command was wrong, fix the proof\n\
         - If work was too vague, make it specific\n\
@@ -171,6 +174,9 @@ pub fn prepare_reconsider_flux(ingot: &Ingot, failure_logs: &str) -> String {
         IMPOSSIBLE: reason\n\n\
         RULES:\n\
         - ALL output ingots MUST have :smelt 2\n\
+        - You MUST change :work or :proof from the failed ingot(s)\n\
+        - Do NOT reuse a proof command pattern that already failed in FAILURE LOGS\n\
+        - Every output ingot must have :status ore and a concrete non-empty :proof\n\
         - Do NOT repeat the same proof command if it failed twice\n\
         - Do NOT repeat the same work description\n\
         - Think about what ACTUALLY exists in the repo right now\n\

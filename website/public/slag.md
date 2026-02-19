@@ -4,6 +4,13 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via Claude agents with automatic retry, re-smelt recovery, and proof-based verification.
 
+## What's new in v1.3.12
+
+- Better retry quality: recovery outputs must change approach and avoid failed proof signatures.
+- Optional independent fallback lane: set `SLAG_SMITH_INDEPENDENT` for re-smelt/reconsider escalation.
+- Forge now refreshes ingot `:work`/`:proof` from `PLAN.md` before each heat to avoid stale loops.
+- Safer S-expression escaping for proof commands with backslashes/quotes.
+
 ## Install
 
 ```bash
@@ -127,7 +134,7 @@ Every ingot carries a `:proof` field containing a shell command. Exit code 0 mea
 When a surveyor or founder output contains questions, slag detects them and feeds the output back with instructions to resolve autonomously. Up to 3 rounds. This prevents the forge from stalling on ambiguity. The AI is instructed to make expert decisions rather than ask for clarification.
 
 ### Why Re-Smelt + Reconsider?
-When an ingot cracks after exhausting all heats, re-smelting analyzes failure logs, blueprint, and git history to diagnose the root cause. It can rewrite the work/proof, split into sub-ingots, or declare impossible. If a re-smelted ingot cracks again, a reconsider pass rethinks the approach (not just tweaks), so each ingot gets two recovery stages before permanently cracking.
+When an ingot cracks after exhausting all heats, re-smelting analyzes failure logs, blueprint, and git history to diagnose the root cause. Recovery outputs now pass a strict contract: change approach, keep concrete proofs, and avoid previously failed proof signatures. If primary recovery output is rejected, slag can escalate to `SLAG_SMITH_INDEPENDENT` for an independent retry. If a re-smelted ingot cracks again, a reconsider pass rethinks the approach (not just tweaks), so each ingot gets two recovery stages before permanently cracking.
 
 ### Why Metallurgical Metaphor?
 Unambiguous vocabulary that maps naturally to the pipeline. Ore (raw input) is surveyed, cast into ingots, heated in a forge, and either becomes forged steel or cracked waste. Every term has exactly one meaning. The temperature gradient (cold → hot → pure) maps to progress from unstarted to complete.
