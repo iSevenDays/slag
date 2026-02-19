@@ -4,11 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.15
+## What's new in v1.3.16
 
-- Better stall visibility: `--verbose` now emits periodic forge heartbeats when parallel anvils are still running, including active ingot IDs and elapsed durations.
-- New debug alias: use `--debug` as an alias for `--verbose`.
-- Heartbeat tuning: set `SLAG_VERBOSE_HEARTBEAT_SECS` (default `15`) to adjust verbose heartbeat cadence.
+- Stale molten recovery prompt: when forge finds interrupted `molten` ingots with no runnable `ore`, it now prompts for action: `requeue` (default), `crack`, or `abort`.
+- Re-forge ETA hint: the stale-state prompt includes a best-effort time estimate based on recent forge logs.
+- Safer unattended behavior: in non-interactive runs, stale `molten` ingots auto-requeue to `ore` so CI/headless runs do not hang.
 
 ## Install
 
