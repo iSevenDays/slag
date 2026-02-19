@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::config::{BLUEPRINT, CRUCIBLE, LEDGER, ORE_FILE};
+use crate::config::{BLUEPRINT, CRUCIBLE, LEDGER, MAX_ITERATE, ORE_FILE};
 use crate::crucible::{self, Crucible};
 use crate::error::SlagError;
 use crate::flux;
 use crate::proof;
-use crate::sexp::{Ingot, Status};
+use crate::sexp::{Ingot, Skill, Status};
 use crate::smith::Smith;
 use crate::tui;
 
@@ -38,19 +38,55 @@ pub async fn validate_and_queue(
     spinner.finish_and_clear();
 
     log_to_file("OUTCOME_RAW", &response);
+    let mut response = response;
+    let mut decision = parse_outcome_response(&response);
+    for attempt in 1..=MAX_ITERATE {
+        if decision.status_known && !decision.test_cmd.trim().is_empty() {
+            break;
+        }
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            &format!("Outcome format retry {attempt}/{MAX_ITERATE}"),
+        );
+        let recast_prompt =
+            flux::prepare_outcome_recast_flux(&ore, &blueprint, &crucible, &ledger_tail, &response);
+        log_to_file(&format!("OUTCOME_RECAST_PROMPT_{attempt}"), &recast_prompt);
+        let retry_spinner = tui::spinner("re-validating...");
+        let retry_raw = smith.invoke(&recast_prompt).await.map_err(|e| {
+            retry_spinner.finish_and_clear();
+            SlagError::OutcomeFailed(format!("validator re-cast failed: {e}"))
+        })?;
+        retry_spinner.finish_and_clear();
+        log_to_file(&format!("OUTCOME_RECAST_RAW_{attempt}"), &retry_raw);
+        response = retry_raw;
+        decision = parse_outcome_response(&response);
+    }
 
-    let decision = parse_outcome_response(&response);
     let comment = if decision.comment.is_empty() {
         "no comment".to_string()
     } else {
         decision.comment.clone()
     };
-    let test_cmd = decision.test_cmd.trim();
-
+    let mut test_cmd = decision.test_cmd.trim().to_string();
+    let mut used_fallback_test = false;
     if test_cmd.is_empty() {
-        return Err(SlagError::OutcomeFailed(
-            "validator did not provide a TEST command".into(),
-        ));
+        if let Ok(current_crucible) = Crucible::load(Path::new(CRUCIBLE)) {
+            if let Some(fallback) = fallback_outcome_test(&current_crucible, requires_browser_test)
+            {
+                test_cmd = fallback;
+                used_fallback_test = true;
+            }
+        }
+    }
+    if test_cmd.is_empty() {
+        // Never dead-stop the cycle due to malformed validator formatting.
+        // Force FAIL path and queue a repair ingot.
+        test_cmd = "false".into();
+        used_fallback_test = true;
+    }
+    if used_fallback_test {
+        println!("  \x1b[38;5;220m↺\x1b[0m validator did not provide TEST; using fallback command");
     }
 
     println!(
@@ -58,16 +94,16 @@ pub async fn validate_and_queue(
         if verbose {
             test_cmd.to_string()
         } else {
-            tui::truncate(test_cmd, 80)
+            tui::truncate(&test_cmd, 80)
         }
     );
-    let browser_shape_ok = !requires_browser_test || looks_like_browser_test(test_cmd);
+    let browser_shape_ok = !requires_browser_test || looks_like_browser_test(&test_cmd);
     if requires_browser_test && !browser_shape_ok {
         println!(
             "  \x1b[31m✗\x1b[0m outcome TEST must be browser/runtime-aware for web/simulation outcomes"
         );
     }
-    let (test_ok, test_output) = proof::run_shell(test_cmd).await;
+    let (test_ok, test_output) = proof::run_shell(&test_cmd).await;
     log_to_file(
         "OUTCOME_TEST",
         &format!(
@@ -108,14 +144,20 @@ pub async fn validate_and_queue(
         println!("  \x1b[31m✗\x1b[0m validator TEST did not include browser checks");
     }
 
-    if decision.repair_ingots.is_empty() {
-        return Err(SlagError::OutcomeFailed(
-            "validator returned FAIL without repair ingots".into(),
+    let mut repair_ingots = decision.repair_ingots;
+    if repair_ingots.is_empty() {
+        println!(
+            "  \x1b[38;5;220m↺\x1b[0m validator returned FAIL without repair ingots; queuing synthetic repair"
+        );
+        repair_ingots.push(synthetic_repair_ingot(
+            &test_cmd,
+            &comment,
+            requires_browser_test,
         ));
     }
 
     let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
-    let added = append_repair_ingots(&mut crucible, decision.repair_ingots, cycle);
+    let added = append_repair_ingots(&mut crucible, repair_ingots, cycle);
     crucible.save()?;
 
     if added == 0 {
@@ -134,6 +176,7 @@ pub async fn validate_and_queue(
 #[derive(Debug)]
 struct OutcomeDecision {
     passed: bool,
+    status_known: bool,
     comment: String,
     test_cmd: String,
     repair_ingots: Vec<Ingot>,
@@ -171,14 +214,146 @@ fn parse_outcome_response(raw: &str) -> OutcomeDecision {
         }
     }
 
+    if comment.is_empty() {
+        comment = raw
+            .lines()
+            .map(str::trim)
+            .find(|line| {
+                !line.is_empty()
+                    && !line.to_ascii_uppercase().starts_with("ASK:")
+                    && !line.starts_with('🟩')
+            })
+            .unwrap_or_default()
+            .to_string();
+    }
+    if status.is_none() {
+        status = infer_status_from_text(raw);
+    }
+    if test_cmd.is_empty() {
+        test_cmd = infer_test_from_text(raw);
+    }
+
     let repair_ingots = crucible::parse_ingot_lines(raw);
+    let status_known = status.is_some();
     let passed = status.unwrap_or(false);
 
     OutcomeDecision {
         passed,
+        status_known,
         comment,
         test_cmd,
         repair_ingots,
+    }
+}
+
+fn infer_status_from_text(raw: &str) -> Option<bool> {
+    for line in raw.lines() {
+        let upper = line.trim().to_ascii_uppercase();
+        if upper.contains("OUTCOME") && upper.contains("PASS") && !upper.contains("FAIL") {
+            return Some(true);
+        }
+        if upper.contains("OUTCOME") && upper.contains("FAIL") {
+            return Some(false);
+        }
+        if upper == "PASS" || upper.starts_with("PASS:") {
+            return Some(true);
+        }
+        if upper == "FAIL" || upper.starts_with("FAIL:") {
+            return Some(false);
+        }
+    }
+    None
+}
+
+fn infer_test_from_text(raw: &str) -> String {
+    for line in raw.lines() {
+        let trimmed = line.trim().trim_start_matches("- ").trim();
+        if let Some(cmd) = trimmed
+            .strip_prefix('`')
+            .and_then(|s| s.strip_suffix('`'))
+            .map(str::trim)
+        {
+            if looks_like_shell_cmd(cmd) {
+                return cmd.to_string();
+            }
+        }
+        if looks_like_shell_cmd(trimmed) {
+            return trimmed.to_string();
+        }
+    }
+    String::new()
+}
+
+fn looks_like_shell_cmd(line: &str) -> bool {
+    let l = line.trim();
+    if l.is_empty() {
+        return false;
+    }
+    let lowered = l.to_lowercase();
+    lowered.starts_with("npm ")
+        || lowered.starts_with("npx ")
+        || lowered.starts_with("node ")
+        || lowered.starts_with("cargo ")
+        || lowered.starts_with("bash ")
+        || lowered.starts_with("sh ")
+        || lowered.starts_with("python ")
+        || lowered.starts_with("pytest ")
+        || lowered.starts_with("pnpm ")
+        || lowered.starts_with("yarn ")
+        || lowered.starts_with("playwright ")
+        || lowered.starts_with("curl ")
+        || lowered.starts_with("test ")
+}
+
+fn fallback_outcome_test(crucible: &Crucible, requires_browser_test: bool) -> Option<String> {
+    let mut generic_fallback: Option<String> = None;
+    for ingot in crucible.ingots.iter().rev() {
+        if ingot.status != Status::Forged {
+            continue;
+        }
+        let proof = ingot.proof.trim();
+        if proof.is_empty() || proof == "true" {
+            continue;
+        }
+        if requires_browser_test && looks_like_browser_test(proof) {
+            return Some(proof.to_string());
+        }
+        if generic_fallback.is_none() {
+            generic_fallback = Some(proof.to_string());
+        }
+    }
+    generic_fallback
+}
+
+fn synthetic_repair_ingot(test_cmd: &str, comment: &str, requires_browser_test: bool) -> Ingot {
+    let summary = if comment.trim().is_empty() {
+        "Outcome validation failed".to_string()
+    } else {
+        tui::truncate(comment.trim(), 120)
+    };
+    Ingot {
+        id: "v_auto".into(),
+        status: Status::Ore,
+        solo: false,
+        grade: if requires_browser_test { 3 } else { 2 },
+        skill: if requires_browser_test {
+            Skill::Web
+        } else {
+            Skill::Default
+        },
+        heat: 0,
+        max: 5,
+        smelt: 0,
+        proof: if test_cmd.trim().is_empty() {
+            "true".into()
+        } else {
+            test_cmd.to_string()
+        },
+        work: format!(
+            "Fix outcome validation failure and make TEST pass: {}",
+            summary
+        ),
+        extra: vec![],
     }
 }
 
@@ -310,6 +485,7 @@ mod tests {
         let raw = "STATUS: PASS\nCOMMENT: behavior looks correct\nTEST: echo ok\n";
         let decision = parse_outcome_response(raw);
         assert!(decision.passed);
+        assert!(decision.status_known);
         assert_eq!(decision.comment, "behavior looks correct");
         assert_eq!(decision.test_cmd, "echo ok");
         assert!(decision.repair_ingots.is_empty());
@@ -325,6 +501,7 @@ TEST: npm test
 "#;
         let decision = parse_outcome_response(raw);
         assert!(!decision.passed);
+        assert!(decision.status_known);
         assert_eq!(decision.test_cmd, "npm test");
         assert_eq!(decision.repair_ingots.len(), 1);
         assert_eq!(decision.repair_ingots[0].id, "v1");
@@ -397,5 +574,28 @@ TEST: npm test
             "node -e \"const { chromium } = require('playwright')\""
         ));
         assert!(!looks_like_browser_test("npm test"));
+    }
+
+    #[test]
+    fn parse_outcome_infers_pass_status_from_narrative() {
+        let raw = "The outcome is **PASS**: simulation works.\nAll acceptance criteria confirmed via Playwright.";
+        let decision = parse_outcome_response(raw);
+        assert!(decision.passed);
+        assert!(decision.status_known);
+    }
+
+    #[test]
+    fn parse_outcome_infers_test_from_inline_command() {
+        let raw = "Use this command:\n`npx playwright test`";
+        let decision = parse_outcome_response(raw);
+        assert_eq!(decision.test_cmd, "npx playwright test");
+    }
+
+    #[test]
+    fn synthetic_repair_is_web_for_browser_outcomes() {
+        let repair = synthetic_repair_ingot("npx playwright test", "No snakes visible", true);
+        assert_eq!(repair.skill, Skill::Web);
+        assert_eq!(repair.grade, 3);
+        assert_eq!(repair.status, Status::Ore);
     }
 }
