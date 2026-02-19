@@ -26,7 +26,7 @@ pub async fn run(
 
     // Phase 1: Survey
     if !std::path::Path::new(crate::config::BLUEPRINT).exists() {
-        let smith = ClaudeSmith::plan(smith_config);
+        let smith = ClaudeSmith::new(smith_config.surveyor.clone());
         surveyor::run(&smith, pipeline_config.verbose).await?;
     }
 
@@ -37,9 +37,13 @@ pub async fn run(
         !content.contains("(ingot ")
     };
     if needs_founder {
-        // Founder is pure text synthesis; base mode is less likely to emit planning wrappers.
-        let smith = ClaudeSmith::base(smith_config);
-        founder::run(&smith, pipeline_config.verbose).await?;
+        let smith = ClaudeSmith::new(smith_config.founder.clone());
+        founder::run(
+            &smith,
+            pipeline_config.verbose,
+            smith_config.founder_confidence_threshold,
+        )
+        .await?;
     }
 
     // Phase 3: Forge (with retry loop)
@@ -88,7 +92,7 @@ pub async fn run(
 
         // Phase 3.5: Review (if worktree mode enabled)
         if pipeline_config.should_review() && !forged_branches.is_empty() {
-            let smith = ClaudeSmith::base(smith_config);
+            let smith = ClaudeSmith::new(smith_config.review.clone());
             review::run(&smith, pipeline_config, &forged_branches).await?;
         } else if pipeline_config.worktree
             && pipeline_config.skip_review
@@ -111,8 +115,13 @@ pub async fn run(
         if counts.cracked == 0 {
             if pipeline_config.outcome_gate {
                 let validator = ClaudeSmith::new(smith_config.outcome.clone());
-                let outcome_passed =
-                    outcome::validate_and_queue(&validator, cycle, pipeline_config.verbose).await?;
+                let outcome_passed = outcome::validate_and_queue(
+                    &validator,
+                    cycle,
+                    pipeline_config.verbose,
+                    smith_config.outcome_confidence_threshold,
+                )
+                .await?;
                 if outcome_passed {
                     break;
                 }
@@ -141,7 +150,7 @@ pub async fn run(
         }
 
         // Analyze failures and prepare for retry
-        let smith = ClaudeSmith::base(smith_config);
+        let smith = ClaudeSmith::new(smith_config.recovery.clone());
         let can_retry = analysis::analyze_and_prepare(&smith, smith_config, cycle).await?;
 
         if !can_retry {

@@ -24,6 +24,7 @@ pub async fn validate_and_queue(
     smith: &dyn Smith,
     cycle: usize,
     verbose: bool,
+    confidence_threshold: f32,
 ) -> Result<bool, SlagError> {
     tui::header("OUTCOME · independent validation");
 
@@ -135,14 +136,41 @@ pub async fn validate_and_queue(
     let (mut test_cmd, mut used_fallback_test) = resolve_test_cmd(&decision, requires_browser_test);
     let mut weak_pass_conflict =
         decision.passed && looks_like_weak_test(&test_cmd, requires_browser_test);
+    let mut confidence = outcome_confidence(
+        &decision,
+        &test_cmd,
+        format_retries,
+        requires_browser_test,
+        &response,
+    );
+    println!(
+        "  \x1b[90mconfidence:\x1b[0m {:.2} (threshold {:.2})",
+        confidence, confidence_threshold
+    );
+    log_to_file(
+        "OUTCOME_CONFIDENCE",
+        &format!(
+            "confidence={:.3}\nthreshold={:.3}\nstatus_known={}\npassed={}\nformat_retries={}\nweak_pass_conflict={}\nrequires_browser_test={}",
+            confidence,
+            confidence_threshold,
+            decision.status_known,
+            decision.passed,
+            format_retries,
+            weak_pass_conflict,
+            requires_browser_test
+        ),
+    );
 
-    if malformed_twice || weak_pass_conflict {
+    let low_confidence = confidence < confidence_threshold;
+    if malformed_twice || weak_pass_conflict || low_confidence {
         let reason = if malformed_twice && weak_pass_conflict {
             "malformed outcome response retries and weak PASS test"
         } else if malformed_twice {
             "malformed outcome response retries"
-        } else {
+        } else if weak_pass_conflict {
             "PASS text conflicts with weak TEST"
+        } else {
+            "outcome confidence below threshold"
         };
         if let Some(subagent_raw) = try_outcome_subagent(
             &ore,
@@ -164,6 +192,28 @@ pub async fn validate_and_queue(
             used_fallback_test = candidate_used_fallback;
             weak_pass_conflict =
                 decision.passed && looks_like_weak_test(&test_cmd, requires_browser_test);
+            confidence = outcome_confidence(
+                &decision,
+                &test_cmd,
+                format_retries,
+                requires_browser_test,
+                &response,
+            );
+            println!(
+                "  \x1b[90mconfidence (subagent):\x1b[0m {:.2} (threshold {:.2})",
+                confidence, confidence_threshold
+            );
+            log_to_file(
+                "OUTCOME_CONFIDENCE_SUBAGENT",
+                &format!(
+                    "confidence={:.3}\nthreshold={:.3}\nstatus_known={}\npassed={}\nweak_pass_conflict={}",
+                    confidence,
+                    confidence_threshold,
+                    decision.status_known,
+                    decision.passed,
+                    weak_pass_conflict
+                ),
+            );
         }
     }
 
@@ -227,7 +277,12 @@ pub async fn validate_and_queue(
         ),
     );
 
-    if decision.passed && test_ok && browser_shape_ok && screenshot_ok {
+    if decision.passed
+        && test_ok
+        && browser_shape_ok
+        && screenshot_ok
+        && confidence >= confidence_threshold
+    {
         println!(
             "  \x1b[1;37m✓\x1b[0m outcome PASS: {}",
             if verbose {
@@ -238,10 +293,11 @@ pub async fn validate_and_queue(
         );
         if requires_browser_test {
             println!(
-                "  \x1b[90mevidence:\x1b[0m screenshot={} metric={} console_errors={}{}",
+                "  \x1b[90mevidence:\x1b[0m screenshot={} metric={} console_errors={} confidence={:.2}{}",
                 evidence.screenshot,
                 evidence.metric_display(),
                 evidence.console_errors_display(),
+                confidence,
                 if used_deterministic_smoke {
                     " (deterministic smoke)"
                 } else {
@@ -273,6 +329,12 @@ pub async fn validate_and_queue(
         println!(
             "  \x1b[31m✗\x1b[0m outcome screenshot missing at {}",
             OUTCOME_SCREENSHOT_PATH
+        );
+    }
+    if confidence < confidence_threshold {
+        println!(
+            "  \x1b[31m✗\x1b[0m outcome confidence {:.2} below threshold {:.2}",
+            confidence, confidence_threshold
         );
     }
 
@@ -362,6 +424,52 @@ fn resolve_test_cmd(decision: &OutcomeDecision, requires_browser_test: bool) -> 
         used_fallback_test = true;
     }
     (test_cmd, used_fallback_test)
+}
+
+fn outcome_confidence(
+    decision: &OutcomeDecision,
+    test_cmd: &str,
+    format_retries: usize,
+    requires_browser_test: bool,
+    raw: &str,
+) -> f32 {
+    let mut score = 0.0f32;
+    if decision.status_known {
+        score += 0.35;
+    }
+    if !decision.comment.trim().is_empty() {
+        score += 0.15;
+    }
+    if !test_cmd.trim().is_empty() {
+        score += 0.20;
+    }
+    if !decision.passed && !decision.repair_ingots.is_empty() {
+        score += 0.10;
+    }
+    if requires_browser_test {
+        if looks_like_browser_test(test_cmd) {
+            score += 0.20;
+        } else {
+            score -= 0.20;
+        }
+    } else if !looks_like_weak_test(test_cmd, false) {
+        score += 0.10;
+    }
+    if decision.passed && looks_like_weak_test(test_cmd, requires_browser_test) {
+        score -= 0.25;
+    }
+    score -= (format_retries.min(3) as f32) * 0.08;
+
+    let raw_lower = raw.to_ascii_lowercase();
+    if raw.contains("```")
+        || raw_lower.contains("<output")
+        || raw_lower.contains("<xml")
+        || raw_lower.contains("ask:")
+    {
+        score -= 0.10;
+    }
+
+    score.clamp(0.0, 1.0)
 }
 
 fn start_timeout_spinner(
@@ -1025,5 +1133,37 @@ TEST: npm test
         assert_eq!(evidence.metric_value, Some(9));
         assert_eq!(evidence.console_errors, Some(0));
         assert_eq!(evidence.screenshot, "logs/outcome-smoke.png");
+    }
+
+    #[test]
+    fn outcome_confidence_high_for_well_formed_pass() {
+        let decision = OutcomeDecision {
+            passed: true,
+            status_known: true,
+            comment: "looks good".to_string(),
+            test_cmd: "npx playwright test".to_string(),
+            repair_ingots: vec![],
+        };
+        let score = outcome_confidence(
+            &decision,
+            &decision.test_cmd,
+            0,
+            true,
+            "STATUS: PASS\nCOMMENT: looks good\nTEST: npx playwright test",
+        );
+        assert!(score > 0.70);
+    }
+
+    #[test]
+    fn outcome_confidence_low_for_weak_pass() {
+        let decision = OutcomeDecision {
+            passed: true,
+            status_known: false,
+            comment: "".to_string(),
+            test_cmd: "test -f index.html".to_string(),
+            repair_ingots: vec![],
+        };
+        let score = outcome_confidence(&decision, &decision.test_cmd, 2, true, "maybe pass?");
+        assert!(score < 0.40);
     }
 }

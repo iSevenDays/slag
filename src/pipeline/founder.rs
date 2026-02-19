@@ -1,15 +1,21 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::config::{BLUEPRINT, CRUCIBLE, MAX_ITERATE, ORE_FILE};
 use crate::crucible::{self, Crucible};
 use crate::error::SlagError;
 use crate::flux;
+use crate::sexp::Ingot;
 use crate::smith::claude::ClaudeSmith;
 use crate::smith::{self, Smith};
 use crate::tui;
 
 /// Phase 2: Read blueprint and produce S-expression ingots in PLAN.md
-pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
+pub async fn run(
+    smith: &dyn Smith,
+    verbose: bool,
+    confidence_threshold: f32,
+) -> Result<(), SlagError> {
     tui::header("FOUNDER · casting mold");
 
     let ore = std::fs::read_to_string(ORE_FILE).map_err(|_| SlagError::NoOre)?;
@@ -30,12 +36,14 @@ pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
     // Self-iterate if questions
     let mut raw = smith::self_iterate(smith, raw, MAX_ITERATE).await?;
     let mut ingots = crucible::parse_ingot_lines(&raw);
+    let mut format_retries = 0usize;
 
     // Recovery path: some models return prose/XML despite strict format instructions.
     for attempt in 1..=MAX_ITERATE {
         if !ingots.is_empty() {
             break;
         }
+        format_retries += 1;
         tui::status_line(
             "↺",
             tui::COLD,
@@ -55,21 +63,63 @@ pub async fn run(smith: &dyn Smith, verbose: bool) -> Result<(), SlagError> {
         ingots = crucible::parse_ingot_lines(&raw);
     }
 
-    if ingots.is_empty() {
+    let mut confidence = founder_confidence(&raw, &ingots, format_retries);
+    println!(
+        "  \x1b[90mconfidence:\x1b[0m {:.2} (threshold {:.2})",
+        confidence, confidence_threshold
+    );
+    log_to_file(
+        "FOUNDER_CONFIDENCE",
+        &format!(
+            "confidence={:.3}\nthreshold={:.3}\ningots={}\nretries={}",
+            confidence,
+            confidence_threshold,
+            ingots.len(),
+            format_retries
+        ),
+    );
+
+    if ingots.is_empty() || confidence < confidence_threshold {
         tui::status_line(
             "↺",
             tui::COLD,
-            "Founder produced no ingots; escalating to subagent",
+            if ingots.is_empty() {
+                "Founder produced no ingots; escalating to subagent"
+            } else {
+                "Founder confidence below threshold; escalating to subagent"
+            },
         );
-        if let Some((_handoff_raw, handoff_ingots)) =
+        if let Some((handoff_raw, handoff_ingots)) =
             try_subagent_founder(&ore, &blueprint, &raw).await
         {
+            raw = handoff_raw;
             ingots = handoff_ingots;
+            confidence = founder_confidence(&raw, &ingots, 0);
+            println!(
+                "  \x1b[90mconfidence (subagent):\x1b[0m {:.2} (threshold {:.2})",
+                confidence, confidence_threshold
+            );
+            log_to_file(
+                "FOUNDER_CONFIDENCE_SUBAGENT",
+                &format!(
+                    "confidence={:.3}\nthreshold={:.3}\ningots={}",
+                    confidence,
+                    confidence_threshold,
+                    ingots.len()
+                ),
+            );
         }
     }
 
     if ingots.is_empty() {
         return Err(SlagError::NoIngots);
+    }
+    if confidence < confidence_threshold {
+        tui::status_line(
+            "↺",
+            tui::COLD,
+            "Founder confidence still low after escalation; proceeding with caution",
+        );
     }
 
     // Create crucible
@@ -129,6 +179,51 @@ fn log_to_file(label: &str, content: &str) {
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = format!("{}/{ts}_{label}.log", crate::config::LOG_DIR);
     let _ = std::fs::write(&path, content);
+}
+
+fn founder_confidence(raw: &str, ingots: &[Ingot], format_retries: usize) -> f32 {
+    let mut score = 0.0f32;
+    let count = ingots.len();
+
+    if count > 0 {
+        score += 0.35;
+    }
+    if (2..=24).contains(&count) {
+        score += 0.20;
+    } else if count == 1 {
+        score += 0.10;
+    } else if count > 24 {
+        score += 0.12;
+    }
+
+    if count > 0 {
+        let valid_fields = ingots
+            .iter()
+            .filter(|i| {
+                !i.id.trim().is_empty()
+                    && !i.work.trim().is_empty()
+                    && !i.proof.trim().is_empty()
+                    && i.max > 0
+            })
+            .count();
+        score += 0.25 * (valid_fields as f32 / count as f32);
+
+        let mut seen = HashSet::new();
+        let mut unique = 0usize;
+        for ingot in ingots {
+            if seen.insert(ingot.id.clone()) {
+                unique += 1;
+            }
+        }
+        score += 0.10 * (unique as f32 / count as f32);
+    }
+
+    let raw_lower = raw.to_ascii_lowercase();
+    if raw.contains("```") || raw_lower.contains("<xml") || raw_lower.contains("<output") {
+        score -= 0.10;
+    }
+    score -= (format_retries.min(3) as f32) * 0.08;
+    score.clamp(0.0, 1.0)
 }
 
 fn subagent_command() -> String {
@@ -205,4 +300,39 @@ async fn try_subagent_founder(
         return None;
     }
     Some((raw, ingots))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sexp::{Skill, Status};
+
+    fn sample_ingot(id: &str) -> Ingot {
+        Ingot {
+            id: id.to_string(),
+            status: Status::Ore,
+            solo: true,
+            grade: 2,
+            skill: Skill::Default,
+            heat: 0,
+            max: 5,
+            smelt: 0,
+            proof: "cargo test --all".to_string(),
+            work: "Implement feature".to_string(),
+            extra: vec![],
+        }
+    }
+
+    #[test]
+    fn founder_confidence_is_low_with_no_ingots() {
+        let score = founder_confidence("no ingots", &[], 2);
+        assert!(score < 0.30);
+    }
+
+    #[test]
+    fn founder_confidence_is_high_with_valid_ingots() {
+        let ingots = vec![sample_ingot("i1"), sample_ingot("i2"), sample_ingot("i3")];
+        let score = founder_confidence("(ingot ...)", &ingots, 0);
+        assert!(score > 0.70);
+    }
 }

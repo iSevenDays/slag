@@ -139,7 +139,7 @@ pub async fn run(
                             ingot.heat = heat_used;
                         }
                         if let Some(ingot) = crucible.get(&id).cloned() {
-                            let smith = ClaudeSmith::base(config);
+                            let smith = ClaudeSmith::new(config.recovery.clone());
                             if resmelt::resmelt_ingot(&mut crucible, &ingot, &smith)
                                 .await
                                 .is_ok()
@@ -205,8 +205,8 @@ pub async fn run(
                 if let Some(ingot) = crucible.get_mut(&ingot.id) {
                     ingot.heat = heat_used;
                 }
-                let base_smith = ClaudeSmith::base(config);
-                if resmelt::resmelt_ingot(&mut crucible, &ingot, &base_smith)
+                let recovery_smith = ClaudeSmith::new(config.recovery.clone());
+                if resmelt::resmelt_ingot(&mut crucible, &ingot, &recovery_smith)
                     .await
                     .is_ok()
                 {

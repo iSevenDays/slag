@@ -19,7 +19,14 @@ pub struct SmithConfig {
     pub plan: String,
     pub web: String,
     pub web_plan: String,
+    pub surveyor: String,
+    pub founder: String,
+    pub review: String,
+    pub recovery: String,
     pub outcome: String,
+    pub confidence_threshold: f32,
+    pub founder_confidence_threshold: f32,
+    pub outcome_confidence_threshold: f32,
 }
 
 impl SmithConfig {
@@ -29,15 +36,31 @@ impl SmithConfig {
         let plan = format!("{base} --permission-mode plan");
         let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
         let web_plan = format!("{web} --permission-mode plan");
+        let surveyor = std::env::var("SLAG_SMITH_SURVEYOR").unwrap_or_else(|_| plan.clone());
+        let founder = std::env::var("SLAG_SMITH_FOUNDER").unwrap_or_else(|_| base.clone());
+        let review = std::env::var("SLAG_SMITH_REVIEW").unwrap_or_else(|_| base.clone());
+        let recovery = std::env::var("SLAG_SMITH_RECOVERY").unwrap_or_else(|_| base.clone());
         // Outcome validation should be non-interactive and deterministic by default.
         // Use plan mode unless explicitly overridden by SLAG_SMITH_OUTCOME.
         let outcome = std::env::var("SLAG_SMITH_OUTCOME").unwrap_or_else(|_| plan.clone());
+        let confidence_threshold = parse_confidence("SLAG_CONFIDENCE_THRESHOLD", 0.65);
+        let founder_confidence_threshold =
+            parse_confidence("SLAG_FOUNDER_CONFIDENCE_THRESHOLD", confidence_threshold);
+        let outcome_confidence_threshold =
+            parse_confidence("SLAG_OUTCOME_CONFIDENCE_THRESHOLD", confidence_threshold);
         Self {
             base,
             plan,
             web,
             web_plan,
+            surveyor,
+            founder,
+            review,
+            recovery,
             outcome,
+            confidence_threshold,
+            founder_confidence_threshold,
+            outcome_confidence_threshold,
         }
     }
 
@@ -60,6 +83,14 @@ impl SmithConfig {
             }
         }
     }
+}
+
+fn parse_confidence(name: &str, default: f32) -> f32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(default)
 }
 
 /// Resolve a project-relative path

@@ -101,11 +101,12 @@ Default forge output is compact for readability. Use `--verbose` for detailed pe
 
 ### 4. OUTCOME
 Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.
-Set `SLAG_SMITH_OUTCOME` to run this validator on a specific model profile if desired (default is non-interactive plan mode).
+Set `SLAG_SMITH_OUTCOME` to run this validator on a specific model profile if desired (default is non-interactive plan mode). Other phases can be routed independently with `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, and `SLAG_SMITH_RECOVERY`.
 Validator/recast calls are timeout-bounded via `SLAG_OUTCOME_TIMEOUT_SECS` (default 180). Proof/test commands are timeout-bounded via `SLAG_PROOF_TIMEOUT_SECS` (default 120).
 If validator output is malformed (for example prose without `TEST:`), slag recasts validation and falls back to inferred/runtime proofs so the loop continues.
 For web/simulation outcomes, outcome TEST commands must be headless and emit a screenshot to `$SLAG_OUTCOME_SCREENSHOT` (default `logs/outcome-smoke.png`).
 For uncertain web outcomes, slag can force deterministic validation via `scripts/outcome_web_smoke.js` (page loads, runtime metric > 0, zero console errors, screenshot artifact).
+Founder/outcome confidence is scored; thresholds come from `SLAG_CONFIDENCE_THRESHOLD` or phase overrides (`SLAG_FOUNDER_CONFIDENCE_THRESHOLD`, `SLAG_OUTCOME_CONFIDENCE_THRESHOLD`).
 Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default `npx -y @anthropic-ai/claude-code -p`, timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
 
 ### 5. ASSAY

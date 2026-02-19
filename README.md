@@ -74,8 +74,15 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `SLAG_SMITH` | `claude --dangerously-skip-permissions -p` | Main smith for survey/founder/forge |
+| `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
+| `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
+| `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
+| `SLAG_SMITH_RECOVERY` | `SLAG_SMITH` | Override model/flags for analysis/re-smelt/reconsider phases |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
 | `SLAG_SMITH_SUBAGENT` | `npx -y @anthropic-ai/claude-code -p` | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
+| `SLAG_CONFIDENCE_THRESHOLD` | `0.65` | Global default threshold for uncertainty escalation |
+| `SLAG_FOUNDER_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Founder-specific escalation threshold |
+| `SLAG_OUTCOME_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Outcome-specific escalation threshold |
 | `SLAG_OUTCOME_TIMEOUT_SECS` | `180` | Max seconds for each validator/recast response before fallback fail path |
 | `SLAG_SUBAGENT_TIMEOUT_SECS` | `90` | Max seconds for each subagent fallback invocation |
 | `SLAG_PROOF_TIMEOUT_SECS` | `120` | Max seconds for proof/test shell commands before timeout failure |
@@ -221,7 +228,7 @@ Even when all ingots are forged, slag runs an **independent validator pass** to 
 4. **Behavior-first proofs** -- validator requires runtime-focused checks (browser/runtime assertions for web/sim apps)
 5. **Screenshot requirement for web outcomes** -- browser/simulation TEST commands must write a non-empty screenshot artifact to `logs/outcome-smoke.png` (or `$SLAG_OUTCOME_SCREENSHOT`)
 6. **Deterministic web smoke fallback** -- for uncertain web outcomes, slag can run `scripts/outcome_web_smoke.js` to verify page load, runtime metric > 0, console errors = 0, and screenshot output
-7. **Uncertainty handoff** -- if founder returns zero ingots or outcome confidence is low, slag escalates once to `SLAG_SMITH_SUBAGENT`
+7. **Confidence scoring + escalation** -- founder/outcome compute confidence scores and escalate once via `SLAG_SMITH_SUBAGENT` when below threshold
 8. **Format recovery** -- if validator output is malformed (missing `STATUS:`/`TEST:`), slag re-runs validation with a strict recast prompt and fallback TEST inference
 9. **Never dead-stop on validator drift/timeouts** -- if validator fails/times out/omits repair ingots, slag falls back to fail-path + synthetic repair ingot so the cycle continues
 
