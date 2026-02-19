@@ -4,13 +4,12 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.18
+## What's new in v1.3.19
 
-- Release consistency fix: includes the post-release CI/clippy hotfix so `main` and release behavior are aligned.
-- Prompt policy + timeouts: operator prompts are unified behind `--prompt-policy` and `--prompt-timeout-secs` to avoid stalled loops.
-- Typed orchestration aborts: explicit `OperatorAbort` and `StateRecoveryAbort` paths for clearer control flow.
-- Structured run logs: run-scoped event traces at `logs/runs/<run_id>/events.jsonl` with optional `--log-format json`.
-- Reviewer lanes + prompt repetition defaults: review runs `build/behavior/risk` lanes with strict schema; non-plan smith calls default to prompt repetition with guardrails.
+- No more stuck duplicate loops: forge now normalizes duplicate ingot IDs and quarantines malformed pending ingots before retry.
+- Cleaner founder output: placeholder ingots (like `proof:SHELL`) are filtered and IDs are made unique before writing `PLAN.md`.
+- Smith timeout protection: smith invocations now time out via `SLAG_SMITH_TIMEOUT_SECS` (default `300s`) instead of hanging indefinitely.
+- Safer worktree proof execution: worktree and non-worktree proof commands now use the same timeout + dangerous-command guard path.
 
 ## Install
 

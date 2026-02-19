@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::config::{BLUEPRINT, CRUCIBLE, MAX_ITERATE, ORE_FILE};
@@ -35,7 +35,7 @@ pub async fn run(
 
     // Self-iterate if questions
     let mut raw = smith::self_iterate(smith, raw, MAX_ITERATE).await?;
-    let mut ingots = crucible::parse_ingot_lines(&raw);
+    let mut ingots = sanitize_founder_ingots(crucible::parse_ingot_lines(&raw));
     let mut format_retries = 0usize;
 
     // Recovery path: some models return prose/XML despite strict format instructions.
@@ -60,7 +60,7 @@ pub async fn run(
         log_to_file(&format!("FOUNDER_RECAST_RAW_{attempt}"), &retry_raw);
 
         raw = smith::self_iterate(smith, retry_raw, MAX_ITERATE).await?;
-        ingots = crucible::parse_ingot_lines(&raw);
+        ingots = sanitize_founder_ingots(crucible::parse_ingot_lines(&raw));
     }
 
     let mut confidence = founder_confidence(&raw, &ingots, format_retries);
@@ -93,7 +93,7 @@ pub async fn run(
             try_subagent_founder(&ore, &blueprint, &raw).await
         {
             raw = handoff_raw;
-            ingots = handoff_ingots;
+            ingots = sanitize_founder_ingots(handoff_ingots);
             confidence = founder_confidence(&raw, &ingots, 0);
             println!(
                 "  \x1b[90mconfidence (subagent):\x1b[0m {:.2} (threshold {:.2})",
@@ -226,6 +226,79 @@ fn founder_confidence(raw: &str, ingots: &[Ingot], format_retries: usize) -> f32
     score.clamp(0.0, 1.0)
 }
 
+fn sanitize_founder_ingots(parsed: Vec<Ingot>) -> Vec<Ingot> {
+    let mut sanitized = Vec::new();
+    let mut assigned: HashSet<String> = HashSet::new();
+    let mut seen_base: HashMap<String, usize> = HashMap::new();
+
+    for mut ingot in parsed {
+        if !is_concrete_proof(&ingot.proof) || !is_concrete_work(&ingot.work) {
+            continue;
+        }
+
+        let mut base = ingot.id.trim().to_string();
+        if base.is_empty() {
+            base = "i_auto".to_string();
+        }
+        let seen_count = seen_base.entry(base.clone()).or_insert(0);
+        *seen_count += 1;
+
+        let id = if *seen_count == 1 && assigned.insert(base.clone()) {
+            base
+        } else {
+            let mut n = (*seen_count).max(2);
+            let mut candidate = format!("{base}_{n}");
+            while assigned.contains(&candidate) {
+                n += 1;
+                candidate = format!("{base}_{n}");
+            }
+            assigned.insert(candidate.clone());
+            candidate
+        };
+
+        ingot.id = id;
+        ingot.status = crate::sexp::Status::Ore;
+        ingot.heat = 0;
+        ingot.smelt = 0;
+        if ingot.max == 0 {
+            ingot.max = 5;
+        }
+        if ingot.grade == 0 {
+            ingot.grade = 1;
+        }
+        sanitized.push(ingot);
+    }
+
+    sanitized
+}
+
+fn is_concrete_proof(proof: &str) -> bool {
+    let trimmed = proof.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "true" | "shell" | "proof" | "cmd" | "command" | "n/a"
+    ) {
+        return false;
+    }
+    !lower.contains("<shell")
+}
+
+fn is_concrete_work(work: &str) -> bool {
+    let trimmed = work.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if matches!(lower.as_str(), "task" | "todo" | "tbd" | "sub-task") {
+        return false;
+    }
+    true
+}
+
 fn subagent_command() -> String {
     crate::config::subagent_smith_command_from_env()
 }
@@ -333,5 +406,39 @@ mod tests {
         let ingots = vec![sample_ingot("i1"), sample_ingot("i2"), sample_ingot("i3")];
         let score = founder_confidence("(ingot ...)", &ingots, 0);
         assert!(score > 0.70);
+    }
+
+    #[test]
+    fn sanitize_founder_ingots_drops_placeholders() {
+        let mut bad = sample_ingot("i1");
+        bad.proof = "SHELL".to_string();
+        let mut bad_work = sample_ingot("i2");
+        bad_work.work = "task".to_string();
+
+        let clean = sanitize_founder_ingots(vec![bad, bad_work]);
+        assert!(clean.is_empty());
+    }
+
+    #[test]
+    fn sanitize_founder_ingots_uniquifies_ids_and_normalizes() {
+        let mut a = sample_ingot("r1");
+        a.status = Status::Forged;
+        a.heat = 9;
+        a.smelt = 9;
+        a.max = 0;
+        a.grade = 0;
+
+        let mut b = sample_ingot("r1");
+        b.work = "Second work item".to_string();
+
+        let out = sanitize_founder_ingots(vec![a, b]);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].id, "r1");
+        assert_eq!(out[1].id, "r1_2");
+        assert_eq!(out[0].status, Status::Ore);
+        assert_eq!(out[0].heat, 0);
+        assert_eq!(out[0].smelt, 0);
+        assert_eq!(out[0].max, 5);
+        assert_eq!(out[0].grade, 1);
     }
 }

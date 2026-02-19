@@ -74,6 +74,45 @@ pub async fn run(
 
     loop {
         let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
+        let renamed = normalize_duplicate_ingot_ids(&mut crucible);
+        let quarantined = quarantine_invalid_pending_ingots(&mut crucible);
+        if !renamed.is_empty() || !quarantined.is_empty() {
+            crucible.save()?;
+            if !renamed.is_empty() {
+                tui::status_line(
+                    "↺",
+                    tui::WARM,
+                    &format!(
+                        "normalized {} duplicate ingot id(s) to unique ids",
+                        renamed.len()
+                    ),
+                );
+            }
+            if !quarantined.is_empty() {
+                tui::status_line(
+                    "↺",
+                    tui::WARM,
+                    &format!(
+                        "quarantined {} malformed pending ingot(s) as cracked",
+                        quarantined.len()
+                    ),
+                );
+                for (id, reason) in quarantined.iter().take(3) {
+                    println!("  \x1b[90m[{id}] {reason}\x1b[0m");
+                }
+                if quarantined.len() > 3 {
+                    println!("  \x1b[90m... +{} more\x1b[0m", quarantined.len() - 3);
+                }
+            }
+            events::emit_warn(
+                "forge.preflight.quarantine",
+                "normalized duplicate IDs and/or quarantined malformed pending ingots",
+                serde_json::json!({
+                    "renamed": renamed.len(),
+                    "quarantined": quarantined.len(),
+                }),
+            );
+        }
 
         if !crucible.has_pending() {
             // Check for cracked
@@ -370,6 +409,76 @@ fn recover_stale_molten_to_ore(crucible: &mut Crucible) -> Vec<String> {
         }
     }
     recovered
+}
+
+fn normalize_duplicate_ingot_ids(crucible: &mut Crucible) -> Vec<(String, String)> {
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut assigned: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut renamed = Vec::new();
+
+    for ingot in &mut crucible.ingots {
+        let original = ingot.id.clone();
+        let seen_count = seen.entry(original.clone()).or_insert(0);
+        *seen_count += 1;
+
+        if *seen_count == 1 && assigned.insert(original.clone()) {
+            continue;
+        }
+
+        let mut n = (*seen_count).max(2);
+        let mut candidate = format!("{original}_{n}");
+        while assigned.contains(&candidate) {
+            n += 1;
+            candidate = format!("{original}_{n}");
+        }
+        ingot.id = candidate.clone();
+        assigned.insert(candidate.clone());
+        renamed.push((original, candidate));
+    }
+
+    renamed
+}
+
+fn quarantine_invalid_pending_ingots(crucible: &mut Crucible) -> Vec<(String, String)> {
+    let mut quarantined = Vec::new();
+    for ingot in &mut crucible.ingots {
+        if ingot.status != Status::Ore && ingot.status != Status::Molten {
+            continue;
+        }
+        if is_placeholder_proof(&ingot.proof) {
+            ingot.status = Status::Cracked;
+            quarantined.push((ingot.id.clone(), "placeholder :proof".to_string()));
+            continue;
+        }
+        if is_placeholder_work(&ingot.work) {
+            ingot.status = Status::Cracked;
+            quarantined.push((ingot.id.clone(), "placeholder :work".to_string()));
+        }
+    }
+    quarantined
+}
+
+fn is_placeholder_proof(proof: &str) -> bool {
+    let trimmed = proof.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    matches!(
+        lowered.as_str(),
+        "true" | "shell" | "proof" | "cmd" | "command" | "n/a"
+    ) || lowered.contains("<shell")
+}
+
+fn is_placeholder_work(work: &str) -> bool {
+    let trimmed = work.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    matches!(
+        trimmed.to_ascii_lowercase().as_str(),
+        "task" | "todo" | "tbd" | "sub-task"
+    )
 }
 
 fn crack_stale_molten(crucible: &mut Crucible) {
@@ -723,7 +832,7 @@ async fn strike_ingot(
 
         // Run CMD (in worktree if applicable)
         let (ok, output) = if let Some(ref wt_path) = worktree_path {
-            run_shell_in_dir(&cmd, wt_path).await
+            proof::run_shell_in_dir(&cmd, Path::new(wt_path)).await
         } else {
             proof::run_shell(&cmd).await
         };
@@ -739,7 +848,7 @@ async fn strike_ingot(
                 && active_ingot.proof != "true"
             {
                 let (proof_ok, proof_output) = if let Some(ref wt_path) = worktree_path {
-                    run_shell_in_dir(&active_ingot.proof, wt_path).await
+                    proof::run_shell_in_dir(&active_ingot.proof, Path::new(wt_path)).await
                 } else {
                     proof::run_shell(&active_ingot.proof).await
                 };
@@ -879,24 +988,6 @@ async fn invoke_smith_in_worktree(
         .await
 }
 
-/// Run a shell command in a specific directory
-async fn run_shell_in_dir(cmd: &str, dir: &str) -> (bool, String) {
-    match tokio::process::Command::new("bash")
-        .args(["-c", cmd])
-        .current_dir(dir)
-        .output()
-        .await
-    {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let combined = format!("{stdout}{stderr}");
-            (output.status.success(), combined)
-        }
-        Err(e) => (false, format!("spawn error: {e}")),
-    }
-}
-
 /// Git commit in a specific directory (worktree)
 async fn git_commit_in_dir(id: &str, work: &str, dir: &str) {
     let msg = format!("forge({id}): {work}");
@@ -1000,5 +1091,58 @@ mod tests {
         assert_eq!(crucible.get("i1").expect("i1").status, Status::Cracked);
         assert_eq!(crucible.get("i2").expect("i2").status, Status::Ore);
         assert_eq!(crucible.get("i3").expect("i3").status, Status::Forged);
+    }
+
+    #[test]
+    fn normalize_duplicate_ingot_ids_renames_following_duplicates() {
+        let tmp = NamedTempFile::new().expect("tmp file");
+        let mut crucible = Crucible::new(
+            tmp.path(),
+            vec![
+                mk_ingot("r1", Status::Ore),
+                mk_ingot("r1", Status::Ore),
+                mk_ingot("r1", Status::Cracked),
+            ],
+        );
+        let renamed = normalize_duplicate_ingot_ids(&mut crucible);
+        assert_eq!(renamed.len(), 2);
+        assert_eq!(crucible.ingots[0].id, "r1");
+        assert_eq!(crucible.ingots[1].id, "r1_2");
+        assert_eq!(crucible.ingots[2].id, "r1_3");
+    }
+
+    #[test]
+    fn quarantine_invalid_pending_ingots_marks_only_pending_placeholders() {
+        let tmp = NamedTempFile::new().expect("tmp file");
+        let mut ok = mk_ingot("ok", Status::Ore);
+        ok.proof = "cargo test --all".to_string();
+        ok.work = "Run integration tests".to_string();
+
+        let mut bad_pending = mk_ingot("bad_pending", Status::Ore);
+        bad_pending.proof = "SHELL".to_string();
+
+        let mut bad_molten = mk_ingot("bad_molten", Status::Molten);
+        bad_molten.work = "task".to_string();
+
+        let mut bad_forged = mk_ingot("bad_forged", Status::Forged);
+        bad_forged.proof = "SHELL".to_string();
+
+        let mut crucible = Crucible::new(tmp.path(), vec![ok, bad_pending, bad_molten, bad_forged]);
+        let quarantined = quarantine_invalid_pending_ingots(&mut crucible);
+
+        assert_eq!(quarantined.len(), 2);
+        assert_eq!(crucible.get("ok").expect("ok").status, Status::Ore);
+        assert_eq!(
+            crucible.get("bad_pending").expect("bad_pending").status,
+            Status::Cracked
+        );
+        assert_eq!(
+            crucible.get("bad_molten").expect("bad_molten").status,
+            Status::Cracked
+        );
+        assert_eq!(
+            crucible.get("bad_forged").expect("bad_forged").status,
+            Status::Forged
+        );
     }
 }

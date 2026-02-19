@@ -1,9 +1,11 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::time::Duration;
 
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::time::timeout;
 
 use super::Smith;
 use crate::config::SmithConfig;
@@ -12,6 +14,7 @@ use crate::events;
 
 const DEFAULT_PROMPT_REPEAT_COUNT: usize = 2;
 const DEFAULT_PROMPT_REPEAT_MAX_CHARS: usize = 12_000;
+const DEFAULT_SMITH_TIMEOUT_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptRepeatMode {
@@ -69,6 +72,7 @@ impl ClaudeSmith {
         if parts.is_empty() {
             return Err(SlagError::SmithFailed("empty smith command".into()));
         }
+        let timeout_secs = smith_timeout_secs();
 
         let program = parts[0];
         let args = &parts[1..];
@@ -78,7 +82,8 @@ impl ClaudeSmith {
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
         if let Some(dir) = cwd {
             command.current_dir(dir);
         }
@@ -93,10 +98,24 @@ impl ClaudeSmith {
                 .map_err(|e| SlagError::SmithFailed(format!("stdin write failed: {e}")))?;
         }
 
-        let output = child
-            .wait_with_output()
-            .await
-            .map_err(|e| SlagError::SmithFailed(format!("wait failed: {e}")))?;
+        let output =
+            match timeout(Duration::from_secs(timeout_secs), child.wait_with_output()).await {
+                Ok(Ok(output)) => output,
+                Ok(Err(e)) => return Err(SlagError::SmithFailed(format!("wait failed: {e}"))),
+                Err(_) => {
+                    events::emit_warn(
+                        "smith.invoke.timeout",
+                        "smith invocation timed out",
+                        serde_json::json!({
+                            "timeout_secs": timeout_secs,
+                            "command": truncate_for_log(&self.command, 160),
+                        }),
+                    );
+                    return Err(SlagError::SmithFailed(format!(
+                        "timeout after {timeout_secs}s"
+                    )));
+                }
+            };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -108,6 +127,27 @@ impl ClaudeSmith {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+}
+
+fn smith_timeout_secs() -> u64 {
+    std::env::var("SLAG_SMITH_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SMITH_TIMEOUT_SECS)
+}
+
+fn truncate_for_log(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut chars = text.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
     }
 }
 

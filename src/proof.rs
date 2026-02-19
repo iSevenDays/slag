@@ -1,4 +1,5 @@
 use crate::error::SlagError;
+use std::path::Path;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -19,10 +20,28 @@ pub async fn run_shell(cmd: &str) -> (bool, String) {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(120);
-    run_shell_with_timeout(cmd, timeout_secs).await
+    run_shell_with_timeout_in_dir(cmd, timeout_secs, None).await
 }
 
 pub async fn run_shell_with_timeout(cmd: &str, timeout_secs: u64) -> (bool, String) {
+    run_shell_with_timeout_in_dir(cmd, timeout_secs, None).await
+}
+
+/// Run a shell command in a specific directory and return (success, output).
+pub async fn run_shell_in_dir(cmd: &str, dir: &Path) -> (bool, String) {
+    let timeout_secs = std::env::var("SLAG_PROOF_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(120);
+    run_shell_with_timeout_in_dir(cmd, timeout_secs, Some(dir)).await
+}
+
+async fn run_shell_with_timeout_in_dir(
+    cmd: &str,
+    timeout_secs: u64,
+    dir: Option<&Path>,
+) -> (bool, String) {
     if let Some(reason) = blocked_shell_reason(cmd) {
         return (
             false,
@@ -36,6 +55,9 @@ pub async fn run_shell_with_timeout(cmd: &str, timeout_secs: u64) -> (bool, Stri
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
 
     let child = match command.spawn() {
         Ok(child) => child,
@@ -119,6 +141,7 @@ pub async fn git_commit(id: &str, work: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn extract_cmd_basic() {
@@ -187,5 +210,13 @@ mod tests {
     async fn verify_proof_fails() {
         let result = verify_proof("test -f /nonexistent_file_xyz", "i1").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn run_shell_in_dir_success() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("ok.txt"), "ok").expect("write");
+        let (ok, _) = run_shell_in_dir("test -f ok.txt", dir.path()).await;
+        assert!(ok);
     }
 }
