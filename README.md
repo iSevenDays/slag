@@ -8,11 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.22
+## What's new in v1.3.23
 
-- **Safer smith routing:** prefers Claude-compatible `kimi`, then `codex`/`gemini`/`opencode`/`claude`, with native `kimi` only as last fallback.
-- **Legacy wrapper auto-fix:** if any `SLAG_SMITH*` env override still uses `kimi --print --prompt`, slag now upgrades it automatically when Claude-compatible `kimi` is available.
-- **More tests and clearer docs:** added routing/normalization test coverage and aligned README + website behavior docs.
+- **Runtime smith failover chain:** forge now retries an ingot on the next smith when the current smith hard-fails protocol/invocation.
+- **New `SLAG_SMITH_CHAIN` env:** set explicit smith fallback order (`kimi`, `codex`, `gemini`, `opencode`, `claude`, or full commands).
+- **Smarter routing + safeguards:** chain entries keep skill/grade routing where supported, with new failover events and tests.
 
 ## Install
 
@@ -83,6 +83,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `SLAG_SMITH` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Main smith for survey/founder/forge |
+| `SLAG_SMITH_CHAIN` | auto-generated from detected smiths | Comma-separated fallback chain for forge smith failover (aliases: `kimi`, `codex`, `gemini`, `opencode`, `claude`) |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
@@ -105,6 +106,8 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 
 When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
 `kimi` (Claude-compatible), `codex`, `gemini`, `opencode`, `claude`, then native `kimi` as last fallback.
+
+Forge now uses a runtime failover chain: if the active smith hard-fails protocol/invocation for an ingot, slag retries that ingot on the next smith in `SLAG_SMITH_CHAIN` automatically.
 
 ## Progress display
 

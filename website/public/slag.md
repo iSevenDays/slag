@@ -4,11 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.22
+## What's new in v1.3.23
 
-- Safer smith routing: prefers Claude-compatible `kimi`, then `codex`/`gemini`/`opencode`/`claude`, with native `kimi` only as last fallback.
-- Legacy wrapper auto-fix: if any `SLAG_SMITH*` env override still uses `kimi --print --prompt`, slag now upgrades it automatically when Claude-compatible `kimi` is available.
-- More tests and clearer docs: added routing/normalization test coverage and aligned README + website behavior docs.
+- Runtime smith failover chain: forge now retries an ingot on the next smith when the current smith hard-fails protocol/invocation.
+- New `SLAG_SMITH_CHAIN` env: set explicit smith fallback order (`kimi`, `codex`, `gemini`, `opencode`, `claude`, or full commands).
+- Smarter routing + safeguards: chain entries keep skill/grade routing where supported, with new failover events and tests.
 
 ## Install
 
@@ -117,7 +117,8 @@ If validator output is malformed (for example prose without `TEST:`), slag recas
 For web/simulation outcomes, outcome TEST commands must be headless and emit a screenshot to `$SLAG_OUTCOME_SCREENSHOT` (default `logs/outcome-smoke.png`).
 For uncertain web outcomes, slag can force deterministic validation via `scripts/outcome_web_smoke.js` (page loads, runtime metric > 0, zero console errors, screenshot artifact).
 Founder/outcome confidence is scored; thresholds come from `SLAG_CONFIDENCE_THRESHOLD` or phase overrides (`SLAG_FOUNDER_CONFIDENCE_THRESHOLD`, `SLAG_OUTCOME_CONFIDENCE_THRESHOLD`).
-Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `kimi`, `codex`, `gemini`, `opencode`, then `claude`; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
+Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `kimi` Claude-compatible, then `codex`, `gemini`, `opencode`, `claude`, with native `kimi` fallback; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
+Forge smith failures can fail over at runtime via `SLAG_SMITH_CHAIN` (comma-separated aliases/commands). On protocol/invocation hard-failure, slag retries the ingot on the next smith in that chain.
 Set `--log-format json` (or `SLAG_LOG_FORMAT=json`) to emit structured event logs while still writing run-scoped traces under `logs/runs/<run_id>/events.jsonl`.
 
 ### 5. ASSAY

@@ -159,15 +159,12 @@ pub async fn run(
             // Spawn parallel tasks
             let mut set = tokio::task::JoinSet::new();
             for ingot in ingot_snapshots {
-                let smith_cmd = config.select(ingot.skill.as_str(), ingot.grade).to_string();
-                let smith_hint = smith_cmd.clone();
+                let smith_chain = config.select_chain(ingot.skill.as_str(), ingot.grade);
                 let worktree_mode = use_worktree;
                 set.spawn(async move {
-                    let smith = ClaudeSmith::new(smith_cmd);
-                    let result = strike_ingot(
+                    let result = strike_ingot_with_chain(
                         &ingot,
-                        &smith,
-                        &smith_hint,
+                        &smith_chain,
                         worktree_mode,
                         OutputMode::Quiet,
                     )
@@ -182,7 +179,7 @@ pub async fn run(
                 .map(|id| (id.clone(), Instant::now()))
                 .collect();
             let mut last_completion = Instant::now();
-            let mut protocol_failures = 0usize;
+            let mut smith_fatal_failures = 0usize;
 
             // Collect results and update crucible on main thread
             loop {
@@ -262,8 +259,8 @@ pub async fn run(
                     Ok((id, Err(e))) => {
                         pending_started.remove(&id);
                         last_completion = Instant::now();
-                        if is_smith_protocol_failure(&e) {
-                            protocol_failures += 1;
+                        if is_smith_failover_candidate(&e) {
+                            smith_fatal_failures += 1;
                         }
                         eprintln!(
                             "  \x1b[31m✗\x1b[0m [{}] forge infrastructure error: {e}",
@@ -279,10 +276,10 @@ pub async fn run(
                 }
             }
 
-            if protocol_failures > 0 && protocol_failures == solo_ids.len() {
+            if smith_fatal_failures > 0 && smith_fatal_failures == solo_ids.len() {
                 return Err(SlagError::SmithFailed(format!(
-                    "all {} parallel ingot(s) failed smith protocol (missing CMD across all heats); check SLAG_SMITH/SLAG_SMITH_SUBAGENT command compatibility",
-                    protocol_failures
+                    "all {} parallel ingot(s) failed smith execution after exhausting configured fallback chain; check SLAG_SMITH/SLAG_SMITH_CHAIN compatibility",
+                    smith_fatal_failures
                 )));
             }
 
@@ -373,18 +370,10 @@ pub async fn run(
             &format!("forging [{}] (in fire: {in_fire})", ingot.id),
         );
 
-        let smith_cmd = config.select(ingot.skill.as_str(), ingot.grade).to_string();
-        let smith_hint = smith_cmd.clone();
-        let smith = ClaudeSmith::new(smith_cmd);
+        let smith_chain = config.select_chain(ingot.skill.as_str(), ingot.grade);
 
-        match strike_ingot(
-            &ingot,
-            &smith,
-            &smith_hint,
-            use_worktree,
-            sequential_output_mode,
-        )
-        .await
+        match strike_ingot_with_chain(&ingot, &smith_chain, use_worktree, sequential_output_mode)
+            .await
         {
             Ok(forge_result) => {
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
@@ -425,6 +414,57 @@ pub async fn run(
         tui::ingot_status_line(&crucible.counts());
         println!();
     }
+}
+
+async fn strike_ingot_with_chain(
+    ingot: &Ingot,
+    smith_chain: &[String],
+    worktree_mode: bool,
+    output_mode: OutputMode,
+) -> Result<ForgeResult, SlagError> {
+    let mut last_error: Option<SlagError> = None;
+    for (idx, smith_cmd) in smith_chain.iter().enumerate() {
+        let smith = ClaudeSmith::new(smith_cmd.clone());
+        match strike_ingot(ingot, &smith, smith_cmd, worktree_mode, output_mode).await {
+            Ok(result) => return Ok(result),
+            Err(err) if is_smith_failover_candidate(&err) && idx + 1 < smith_chain.len() => {
+                let next = &smith_chain[idx + 1];
+                events::emit_warn(
+                    "forge.smith.failover",
+                    "smith failed; switching to next fallback command",
+                    serde_json::json!({
+                        "ingot_id": ingot.id,
+                        "from": smith_cmd,
+                        "to": next,
+                        "reason": err.to_string(),
+                        "attempt_index": idx + 1,
+                        "chain_len": smith_chain.len()
+                    }),
+                );
+                if !output_mode.is_quiet() {
+                    tui::status_line(
+                        "↺",
+                        tui::WARM,
+                        &format!(
+                            "smith failover [{}]: {} → {}",
+                            ingot.id,
+                            tui::truncate(smith_cmd, 36),
+                            tui::truncate(next, 36)
+                        ),
+                    );
+                }
+                last_error = Some(err);
+                continue;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        SlagError::SmithFailed(format!(
+            "no smith command available for fallback chain on ingot [{}]",
+            ingot.id
+        ))
+    }))
 }
 
 fn recover_stale_molten_to_ore(crucible: &mut Crucible) -> Vec<String> {
@@ -722,6 +762,7 @@ async fn strike_ingot(
     let mut active_ingot = ingot.clone();
     let branch_name = format!("forge/{}", ingot.id);
     let mut protocol_cmd_fail_count = 0u8;
+    let mut smith_invoke_fail_count = 0u8;
 
     // Create worktree if in worktree mode
     if worktree_mode {
@@ -824,6 +865,7 @@ async fn strike_ingot(
                 if let Some(ref spinner) = spinner {
                     spinner.finish_and_clear();
                 }
+                smith_invoke_fail_count = smith_invoke_fail_count.saturating_add(1);
                 slag = Some(format!("Smith error: {e}"));
                 if !output_mode.is_quiet() {
                     if output_mode.is_verbose() {
@@ -957,6 +999,15 @@ async fn strike_ingot(
         worktree::cleanup_without_merge(&active_ingot.id).await;
     }
 
+    if smith_invoke_fail_count >= active_ingot.max.max(1) {
+        return Err(SlagError::SmithFailed(format!(
+            "smith invocation failed on all {}/{} heats; smith={}",
+            smith_invoke_fail_count,
+            active_ingot.max.max(1),
+            tui::truncate(smith_hint, 120)
+        )));
+    }
+
     if protocol_cmd_fail_count >= active_ingot.max.max(1) {
         return Err(SlagError::SmithFailed(format!(
             "smith protocol failure for [{}]: missing/invalid CMD on all {}/{} heats; smith={}",
@@ -977,6 +1028,20 @@ fn is_smith_protocol_failure(err: &SlagError) -> bool {
     match err {
         SlagError::SmithFailed(msg) => {
             msg.contains("missing CMD on all") || msg.contains("missing/invalid CMD on all")
+        }
+        _ => false,
+    }
+}
+
+fn is_smith_failover_candidate(err: &SlagError) -> bool {
+    match err {
+        SlagError::SmithFailed(msg) => {
+            is_smith_protocol_failure(err)
+                || msg.contains("smith invocation failed on all")
+                || msg.contains("timeout after")
+                || msg.contains("exit 126")
+                || msg.contains("exit 127")
+                || msg.contains("failed to spawn")
         }
         _ => false,
     }
@@ -1248,6 +1313,17 @@ mod tests {
     }
 
     #[test]
+    fn smith_failover_candidate_detector_matches_smith_failed() {
+        assert!(is_smith_failover_candidate(&SlagError::SmithFailed(
+            "smith invocation failed on all 5/5 heats".to_string()
+        )));
+        assert!(!is_smith_failover_candidate(&SlagError::IngotCracked(
+            "i20".to_string(),
+            5
+        )));
+    }
+
+    #[test]
     fn protocol_placeholder_cmd_detector_rejects_template_artifacts() {
         assert!(is_protocol_placeholder_cmd("<shell command to verify>"));
         assert!(is_protocol_placeholder_cmd(
@@ -1276,5 +1352,18 @@ mod tests {
             }
             other => panic!("expected smith protocol failure, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn strike_ingot_with_chain_fails_over_after_invocation_failure() {
+        let mut ingot = mk_ingot("i_chain", Status::Ore);
+        ingot.max = 1;
+        let chain = vec![
+            "sh -lc 'exit 126'".to_string(),
+            "sh -lc 'printf \"CMD: true\\n\"'".to_string(),
+        ];
+
+        let result = strike_ingot_with_chain(&ingot, &chain, false, OutputMode::Quiet).await;
+        assert!(result.is_ok(), "expected smith chain fallback to recover");
     }
 }

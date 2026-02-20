@@ -309,6 +309,7 @@ slag uses metallurgical vocabulary.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SLAG_SMITH` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Base smith command |
+| `SLAG_SMITH_CHAIN` | auto-generated from detected smiths | Comma-separated forge fallback chain (`kimi`, `codex`, `gemini`, `opencode`, `claude`, or full commands) |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
@@ -339,6 +340,7 @@ The smith command is selected based on `:skill` and `:grade`:
 | web | base + Playwright | base + Playwright + plan mode |
 
 Phase-level overrides are applied first (`SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, `SLAG_SMITH_RECOVERY`, `SLAG_SMITH_OUTCOME`); `SLAG_SMITH_INDEPENDENT` is used only for independent recovery escalation; the `:skill`/`:grade` table governs Forge ingot routing.
+Forge runtime failover uses `SLAG_SMITH_CHAIN`: when a smith hard-fails protocol/invocation for an ingot, slag retries that ingot on the next chain entry.
 
 ---
 

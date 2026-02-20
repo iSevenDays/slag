@@ -21,6 +21,8 @@ const KIMI_NATIVE_WRAPPER: &str =
 const CODEX_WRAPPER: &str = "codex -a never exec --skip-git-repo-check --color never -";
 const GEMINI_WRAPPER: &str = r#"sh -lc 'p=$(cat); gemini -p "$p" --output-format text </dev/null'"#;
 const OPENCODE_WRAPPER: &str = r#"sh -lc 'p=$(cat); opencode -q -p "$p" -f text'"#;
+const CLAUDE_WEB_ALLOWED_TOOLS: &str = "--allowedTools 'Bash Edit Read Write Playwright'";
+const CLAUDE_PLAN_MODE: &str = "--permission-mode plan";
 
 /// Smith configuration resolved from environment
 pub struct SmithConfig {
@@ -37,14 +39,16 @@ pub struct SmithConfig {
     pub confidence_threshold: f32,
     pub founder_confidence_threshold: f32,
     pub outcome_confidence_threshold: f32,
+    base_chain: Vec<String>,
 }
 
 impl SmithConfig {
     pub fn from_env() -> Self {
-        let base = smith_command_from_env("SLAG_SMITH");
-        let plan = format!("{base} --permission-mode plan");
-        let web = format!("{base} --allowedTools 'Bash Edit Read Write Playwright'");
-        let web_plan = format!("{web} --permission-mode plan");
+        let detected_chain = auto_detect_smith_chain();
+        let base = smith_command_from_env_with_detected("SLAG_SMITH", &detected_chain);
+        let plan = route_smith_command(&base, "default", HIGH_GRADE);
+        let web = route_smith_command(&base, "web", 1);
+        let web_plan = route_smith_command(&base, "web", HIGH_GRADE);
         let surveyor = smith_command_override_or("SLAG_SMITH_SURVEYOR", plan.clone());
         let founder = smith_command_override_or("SLAG_SMITH_FOUNDER", base.clone());
         let review = smith_command_override_or("SLAG_SMITH_REVIEW", base.clone());
@@ -59,6 +63,7 @@ impl SmithConfig {
             parse_confidence("SLAG_FOUNDER_CONFIDENCE_THRESHOLD", confidence_threshold);
         let outcome_confidence_threshold =
             parse_confidence("SLAG_OUTCOME_CONFIDENCE_THRESHOLD", confidence_threshold);
+        let base_chain = smith_chain_from_env_or_detected(&base, &detected_chain);
         Self {
             base,
             plan,
@@ -73,6 +78,7 @@ impl SmithConfig {
             confidence_threshold,
             founder_confidence_threshold,
             outcome_confidence_threshold,
+            base_chain,
         }
     }
 
@@ -95,6 +101,21 @@ impl SmithConfig {
             }
         }
     }
+
+    /// Select smith command chain (primary + fallbacks) for skill and grade.
+    pub fn select_chain(&self, skill: &str, grade: u8) -> Vec<String> {
+        let mut chain = Vec::new();
+        for base in &self.base_chain {
+            let routed = route_smith_command(base, skill, grade);
+            if !chain.iter().any(|existing| existing == &routed) {
+                chain.push(routed);
+            }
+        }
+        if chain.is_empty() {
+            chain.push(self.select(skill, grade).to_string());
+        }
+        chain
+    }
 }
 
 fn parse_non_empty_env(name: &str) -> Option<String> {
@@ -108,6 +129,17 @@ fn smith_command_from_env(name: &str) -> String {
     parse_non_empty_env(name)
         .map(normalize_smith_command)
         .unwrap_or_else(default_smith_command)
+}
+
+fn smith_command_from_env_with_detected(name: &str, detected_chain: &[String]) -> String {
+    parse_non_empty_env(name)
+        .map(normalize_smith_command)
+        .unwrap_or_else(|| {
+            detected_chain
+                .first()
+                .cloned()
+                .unwrap_or_else(|| CLAUDE_SMITH_DEFAULT.to_string())
+        })
 }
 
 fn smith_command_override_or(name: &str, fallback: String) -> String {
@@ -126,6 +158,10 @@ pub fn subagent_smith_command_from_env() -> String {
 }
 
 fn auto_detect_smith_command() -> Option<String> {
+    auto_detect_smith_chain().into_iter().next()
+}
+
+fn auto_detect_smith_chain() -> Vec<String> {
     let kimi_path = resolve_command_path("kimi");
     let kimi_native = kimi_path
         .as_deref()
@@ -135,7 +171,7 @@ fn auto_detect_smith_command() -> Option<String> {
         .as_deref()
         .map(is_claude_compatible_kimi_cli)
         .unwrap_or(false);
-    choose_detected_smith(
+    choose_detected_smith_chain(
         |cmd| resolve_command_path(cmd).is_some(),
         kimi_native,
         kimi_claude_compat,
@@ -167,28 +203,42 @@ fn looks_like_legacy_kimi_wrapper(command: &str) -> bool {
 }
 
 fn choose_detected_smith<F>(
-    mut has_cmd: F,
+    has_cmd: F,
     kimi_native: bool,
     kimi_claude_compat: bool,
 ) -> Option<String>
 where
     F: FnMut(&str) -> bool,
 {
+    choose_detected_smith_chain(has_cmd, kimi_native, kimi_claude_compat)
+        .into_iter()
+        .next()
+}
+
+fn choose_detected_smith_chain<F>(
+    mut has_cmd: F,
+    kimi_native: bool,
+    kimi_claude_compat: bool,
+) -> Vec<String>
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut chain = Vec::new();
     let has_kimi = has_cmd("kimi");
     if has_kimi && kimi_claude_compat {
-        return Some(KIMI_CLAUDE_WRAPPER.to_string());
+        chain.push(KIMI_CLAUDE_WRAPPER.to_string());
     }
     if has_cmd("codex") {
-        return Some(CODEX_WRAPPER.to_string());
+        chain.push(CODEX_WRAPPER.to_string());
     }
     if has_cmd("gemini") {
-        return Some(GEMINI_WRAPPER.to_string());
+        chain.push(GEMINI_WRAPPER.to_string());
     }
     if has_cmd("opencode") {
-        return Some(OPENCODE_WRAPPER.to_string());
+        chain.push(OPENCODE_WRAPPER.to_string());
     }
     if has_cmd("claude") {
-        return Some(CLAUDE_SMITH_DEFAULT.to_string());
+        chain.push(CLAUDE_SMITH_DEFAULT.to_string());
     }
     if has_kimi {
         let cmd = if kimi_native && !kimi_claude_compat {
@@ -196,9 +246,129 @@ where
         } else {
             KIMI_CLAUDE_WRAPPER
         };
-        return Some(cmd.to_string());
+        chain.push(cmd.to_string());
     }
-    None
+    dedup_preserve_order(chain)
+}
+
+fn smith_chain_from_env_or_detected(base: &str, detected_chain: &[String]) -> Vec<String> {
+    if let Some(raw) = parse_non_empty_env("SLAG_SMITH_CHAIN") {
+        let kimi_path = resolve_command_path("kimi");
+        let kimi_native = kimi_path
+            .as_deref()
+            .map(is_native_kimi_cli)
+            .unwrap_or(false);
+        let kimi_claude_compat = kimi_path
+            .as_deref()
+            .map(is_claude_compatible_kimi_cli)
+            .unwrap_or(false);
+        let mut chain = parse_smith_chain_tokens(&raw, kimi_native, kimi_claude_compat);
+        if chain.is_empty() {
+            chain.push(base.to_string());
+        }
+        return dedup_preserve_order(chain);
+    }
+
+    let mut chain = Vec::new();
+    chain.push(base.to_string());
+    chain.extend(detected_chain.iter().cloned());
+    dedup_preserve_order(chain)
+}
+
+fn parse_smith_chain_tokens(raw: &str, kimi_native: bool, kimi_claude_compat: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    for token in raw.split(',') {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(resolved) = resolve_smith_chain_alias(trimmed, kimi_native, kimi_claude_compat)
+        {
+            out.push(normalize_smith_command_with_detection(
+                &resolved,
+                kimi_claude_compat,
+            ));
+        } else {
+            out.push(normalize_smith_command_with_detection(
+                trimmed,
+                kimi_claude_compat,
+            ));
+        }
+    }
+    dedup_preserve_order(out)
+}
+
+fn resolve_smith_chain_alias(
+    token: &str,
+    kimi_native: bool,
+    kimi_claude_compat: bool,
+) -> Option<String> {
+    match token.trim().to_ascii_lowercase().as_str() {
+        "kimi" | "kimi-compat" => {
+            if kimi_claude_compat {
+                Some(KIMI_CLAUDE_WRAPPER.to_string())
+            } else if kimi_native {
+                Some(KIMI_NATIVE_WRAPPER.to_string())
+            } else {
+                None
+            }
+        }
+        "kimi-native" => {
+            if kimi_native {
+                Some(KIMI_NATIVE_WRAPPER.to_string())
+            } else {
+                None
+            }
+        }
+        "claude" => Some(CLAUDE_SMITH_DEFAULT.to_string()),
+        "codex" => Some(CODEX_WRAPPER.to_string()),
+        "gemini" => Some(GEMINI_WRAPPER.to_string()),
+        "opencode" => Some(OPENCODE_WRAPPER.to_string()),
+        _ => None,
+    }
+}
+
+fn route_smith_command(base: &str, skill: &str, grade: u8) -> String {
+    if !supports_claude_routing_flags(base) {
+        return base.to_string();
+    }
+    let mut routed = base.to_string();
+    if is_web_skill(skill) && !routed.contains("--allowedTools") {
+        routed.push(' ');
+        routed.push_str(CLAUDE_WEB_ALLOWED_TOOLS);
+    }
+    if grade >= HIGH_GRADE && !routed.contains("--permission-mode") {
+        routed.push(' ');
+        routed.push_str(CLAUDE_PLAN_MODE);
+    }
+    routed
+}
+
+fn supports_claude_routing_flags(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    if lower.contains("codex ") || lower.contains("gemini ") || lower.contains("opencode ") {
+        return false;
+    }
+    lower.contains("claude")
+        || lower.contains("--dangerously-skip-permissions")
+        || lower.contains("--permission-mode")
+}
+
+fn is_web_skill(skill: &str) -> bool {
+    matches!(
+        skill.to_ascii_lowercase().as_str(),
+        "web" | "frontend" | "ui" | "css" | "html"
+    )
+}
+
+fn dedup_preserve_order(mut input: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in input.drain(..) {
+        if !out.iter().any(|existing| existing == &item) {
+            out.push(item);
+        }
+    }
+    out
 }
 
 fn resolve_command_path(command: &str) -> Option<PathBuf> {
@@ -413,6 +583,36 @@ mod tests {
     }
 
     #[test]
+    fn detected_smith_chain_orders_fallbacks() {
+        let chain = choose_detected_smith_chain(
+            |cmd| matches!(cmd, "kimi" | "codex" | "claude"),
+            true,
+            true,
+        );
+        assert_eq!(
+            chain,
+            vec![
+                KIMI_CLAUDE_WRAPPER.to_string(),
+                CODEX_WRAPPER.to_string(),
+                CLAUDE_SMITH_DEFAULT.to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_smith_chain_resolves_aliases_and_dedups() {
+        let chain = parse_smith_chain_tokens("kimi,codex,claude,kimi", true, true);
+        assert_eq!(
+            chain,
+            vec![
+                KIMI_CLAUDE_WRAPPER.to_string(),
+                CODEX_WRAPPER.to_string(),
+                CLAUDE_SMITH_DEFAULT.to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn normalize_legacy_kimi_wrapper_to_claude_compat() {
         let normalized = normalize_smith_command_with_detection(KIMI_NATIVE_WRAPPER, true);
         assert_eq!(normalized, KIMI_CLAUDE_WRAPPER);
@@ -428,6 +628,16 @@ mod tests {
     fn leaves_other_commands_unchanged() {
         let normalized = normalize_smith_command_with_detection("codex -a never exec -", true);
         assert_eq!(normalized, "codex -a never exec -");
+    }
+
+    #[test]
+    fn route_smith_command_adds_web_and_plan_for_claude_compat_only() {
+        let claude_routed = route_smith_command(CLAUDE_SMITH_DEFAULT, "web", HIGH_GRADE);
+        assert!(claude_routed.contains("--allowedTools"));
+        assert!(claude_routed.contains("--permission-mode plan"));
+
+        let codex_routed = route_smith_command(CODEX_WRAPPER, "web", HIGH_GRADE);
+        assert_eq!(codex_routed, CODEX_WRAPPER);
     }
 
     #[test]
