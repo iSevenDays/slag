@@ -4,11 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.23
+## What's new in v1.3.24
 
-- Runtime smith failover chain: forge now retries an ingot on the next smith when the current smith hard-fails protocol/invocation.
-- New `SLAG_SMITH_CHAIN` env: set explicit smith fallback order (`kimi`, `codex`, `gemini`, `opencode`, `claude`, or full commands).
-- Smarter routing + safeguards: chain entries keep skill/grade routing where supported, with new failover events and tests.
+- Release sync: README + website release notes and version metadata updated together.
+- Deploy refresh: published a fresh Pages production deployment for the latest release.
+- No runtime behavior changes in this patch.
 
 ## Install
 

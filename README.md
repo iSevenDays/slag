@@ -8,11 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.23
+## What's new in v1.3.24
 
-- **Runtime smith failover chain:** forge now retries an ingot on the next smith when the current smith hard-fails protocol/invocation.
-- **New `SLAG_SMITH_CHAIN` env:** set explicit smith fallback order (`kimi`, `codex`, `gemini`, `opencode`, `claude`, or full commands).
-- **Smarter routing + safeguards:** chain entries keep skill/grade routing where supported, with new failover events and tests.
+- **Release sync:** README + website release notes and version metadata updated together.
+- **Deploy refresh:** published a fresh Pages production deployment for the latest release.
+- **No runtime behavior changes in this patch.**
 
 ## Install
 
