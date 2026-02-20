@@ -8,11 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.24
+## What's new in v1.3.25
 
-- **Release sync:** README + website release notes and version metadata updated together.
-- **Deploy refresh:** published a fresh Pages production deployment for the latest release.
-- **No runtime behavior changes in this patch.**
+- **Sandbox failure detection:** analysis now recognizes read-only sandbox errors (`READ_ONLY_SANDBOX`, `filesystem writes are blocked`, `operation not permitted`) and immediately skips instead of retrying indefinitely.
+- **Smelt history preserved:** retry cycles no longer reset the `:smelt` counter, so ingots that have been through re-smelt and reconsider reach the skip threshold naturally instead of spiraling.
+- **Prompt repetition activated:** raised max-chars threshold from 12K to 40K so real forge prompts get repeated. Prompts exceeding the limit now get partial tail repetition (last ~2000 chars) instead of being skipped entirely.
 
 ## Install
 
@@ -102,7 +102,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_LOG_FORMAT` | `text` | Default log format (`text` or `json`) |
 | `SLAG_PROMPT_REPEAT_MODE` | `non-plan` | Prompt repetition mode (`off`, `non-plan`, `always`) |
 | `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
-| `SLAG_PROMPT_REPEAT_MAX_CHARS` | `12000` | Skip repetition if prompt exceeds this size |
+| `SLAG_PROMPT_REPEAT_MAX_CHARS` | `40000` | Full repetition up to this size; partial tail repetition above |
 
 When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
 `kimi` (Claude-compatible), `codex`, `gemini`, `opencode`, `claude`, then native `kimi` as last fallback.
@@ -236,7 +236,7 @@ Use `--ci-only` to skip AI review and auto-merge on CI pass. Use `--skip-review`
 
 When ingots crack, slag analyzes failures and can retry automatically (up to `--retry N` cycles):
 
-1. **Failure detection** -- identifies patterns: missing dependencies, protocol failures, proof mismatches, JSON errors
+1. **Failure detection** -- identifies patterns: missing dependencies, protocol failures, proof mismatches, JSON errors, sandbox/permission blocks
 2. **Fix application** -- converts parallel ingots to sequential if they have dependencies
 3. **Strict retry contract** -- repaired ingots must change approach, keep concrete proofs, and avoid failed proof signatures
 4. **Independent fallback lane** -- optional escalation to `SLAG_SMITH_INDEPENDENT` if primary repair output is rejected
