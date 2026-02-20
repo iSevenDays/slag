@@ -20,6 +20,8 @@ pub enum FailurePattern {
     ProtocolFailure,
     /// Proof command failed - work/proof mismatch
     ProofMismatch,
+    /// Sandbox/permission failure — smith cannot write files
+    SandboxBlocked,
     /// Unknown failure
     Unknown,
 }
@@ -133,20 +135,18 @@ pub async fn analyze_and_prepare(
         for analysis in &analyses {
             match analysis.recommendation {
                 AnalysisAction::Retry => {
-                    // Reset to ore, clear heat and smelt
+                    // Reset to ore, clear heat but keep smelt to preserve resmelt/reconsider history
                     if let Some(ingot) = crucible.get_mut(&analysis.id) {
                         ingot.status = Status::Ore;
                         ingot.heat = 0;
-                        ingot.smelt = 0;
                     }
                     println!("    \x1b[38;5;220m↺\x1b[0m [{}] reset to ore", analysis.id);
                 }
                 AnalysisAction::MakeSequential => {
-                    // Mark as sequential and reset
+                    // Mark as sequential and reset, keep smelt to preserve history
                     if let Some(ingot) = crucible.get_mut(&analysis.id) {
                         ingot.status = Status::Ore;
                         ingot.heat = 0;
-                        ingot.smelt = 0;
                         ingot.solo = false; // Make sequential
                     }
                     println!(
@@ -244,6 +244,17 @@ fn detect_failure_pattern(ingot: &Ingot) -> FailurePattern {
 
     // Analyze all logs for this ingot
     for (_name, content) in &matching_logs {
+        // Check for sandbox/permission failures (smith can't write files)
+        if content.contains("READ_ONLY_SANDBOX")
+            || content.contains("read-only sandbox")
+            || content.contains("filesystem writes are blocked")
+            || content.contains("operation not permitted")
+            || content.contains("Write access is blocked")
+            || (content.contains("read-only") && content.contains("sandbox"))
+        {
+            return FailurePattern::SandboxBlocked;
+        }
+
         // Check for dependency/file issues
         if content.contains("No such file or directory")
             || content.contains("file not found")
@@ -364,6 +375,10 @@ fn recommend_action(pattern: &FailurePattern, ingot: &Ingot) -> AnalysisAction {
             } else {
                 AnalysisAction::Retry
             }
+        }
+        FailurePattern::SandboxBlocked => {
+            // Sandbox prevents writes — retrying is pointless
+            AnalysisAction::Skip
         }
         FailurePattern::Unknown => {
             // Unknown failure - be aggressive with retries

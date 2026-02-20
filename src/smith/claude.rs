@@ -13,7 +13,7 @@ use crate::error::SlagError;
 use crate::events;
 
 const DEFAULT_PROMPT_REPEAT_COUNT: usize = 2;
-const DEFAULT_PROMPT_REPEAT_MAX_CHARS: usize = 12_000;
+const DEFAULT_PROMPT_REPEAT_MAX_CHARS: usize = 40_000;
 const DEFAULT_SMITH_TIMEOUT_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,15 +167,21 @@ fn maybe_repeat_prompt(prompt: &str, command: &str) -> String {
         return prompt.to_string();
     }
     if prompt.len() > max_chars {
+        // Partial repetition: repeat just the tail (instructions/rules)
+        // per Leviathan et al. 2025 arXiv:2512.14982 §5 item 5
         events::emit_debug(
-            "smith.prompt_repeat.skip_too_long",
-            "skipped prompt repetition due to max length guard",
+            "smith.prompt_repeat.partial_tail",
+            "applied partial tail repetition for long prompt",
             serde_json::json!({
                 "prompt_chars": prompt.len(),
-                "max_chars": max_chars
+                "max_chars": max_chars,
+                "count": count
             }),
         );
-        return prompt.to_string();
+        if !should_repeat(mode, command) {
+            return prompt.to_string();
+        }
+        return repeat_tail(prompt, count);
     }
     if !should_repeat(mode, command) {
         return prompt.to_string();
@@ -201,6 +207,24 @@ fn should_repeat(mode: PromptRepeatMode, command: &str) -> bool {
         PromptRepeatMode::Always => true,
         PromptRepeatMode::NonPlan => !command.contains("--permission-mode plan"),
     }
+}
+
+fn repeat_tail(prompt: &str, count: usize) -> String {
+    const TAIL_CHARS: usize = 2000;
+    let tail_start = prompt.len().saturating_sub(TAIL_CHARS);
+    // Find a clean line break near the cut point
+    let tail_start = prompt[tail_start..]
+        .find('\n')
+        .map(|p| tail_start + p + 1)
+        .unwrap_or(tail_start);
+    let tail = &prompt[tail_start..];
+    let mut out = String::with_capacity(prompt.len() + tail.len() * (count - 1) + 10);
+    out.push_str(prompt);
+    for _ in 1..count {
+        out.push_str("\n\n");
+        out.push_str(tail);
+    }
+    out
 }
 
 fn repeat_prompt(prompt: &str, count: usize) -> String {
