@@ -165,9 +165,9 @@ fn should_quarry(pipeline_config: &PipelineConfig) -> bool {
     if std::path::Path::new(crate::config::PHASES_FILE).exists() {
         return true;
     }
-    // Large commission: ore > 500 chars
+    // Large commission: ore > 300 chars
     let ore = std::fs::read_to_string(crate::config::ORE_FILE).unwrap_or_default();
-    ore.len() > 500
+    ore.len() > 300
 }
 
 /// Scope the ore for a specific phase, combining original PRD + phase context + prior work.
