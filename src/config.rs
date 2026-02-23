@@ -40,8 +40,6 @@ pub struct SmithConfig {
     pub confidence_threshold: f32,
     pub founder_confidence_threshold: f32,
     pub outcome_confidence_threshold: f32,
-    pub max_tokens: Option<u32>,
-    pub surveyor_max_tokens: Option<u32>,
     base_chain: Vec<String>,
 }
 
@@ -49,14 +47,14 @@ impl SmithConfig {
     pub fn from_env() -> Self {
         let detected_chain = auto_detect_smith_chain();
         let base = smith_command_from_env_with_detected("SLAG_SMITH", &detected_chain);
-        let max_tokens = parse_max_tokens("SLAG_MAX_TOKENS");
-        let surveyor_max_tokens =
-            parse_max_tokens("SLAG_SURVEYOR_MAX_TOKENS").or(Some(16000));
-        let plan = route_smith_command(&base, "default", HIGH_GRADE, max_tokens);
-        let web = route_smith_command(&base, "web", 1, max_tokens);
-        let web_plan = route_smith_command(&base, "web", HIGH_GRADE, max_tokens);
+        let effort = parse_non_empty_env("SLAG_EFFORT");
+        let surveyor_effort = parse_non_empty_env("SLAG_SURVEYOR_EFFORT")
+            .or_else(|| Some("low".to_string()));
+        let plan = route_smith_command(&base, "default", HIGH_GRADE, effort.as_deref());
+        let web = route_smith_command(&base, "web", 1, effort.as_deref());
+        let web_plan = route_smith_command(&base, "web", HIGH_GRADE, effort.as_deref());
         let surveyor_cmd =
-            route_smith_command(&base, "default", HIGH_GRADE, surveyor_max_tokens);
+            route_smith_command(&base, "default", HIGH_GRADE, surveyor_effort.as_deref());
         let surveyor = smith_command_override_or("SLAG_SMITH_SURVEYOR", surveyor_cmd);
         let founder = smith_command_override_or("SLAG_SMITH_FOUNDER", base.clone());
         let review = smith_command_override_or("SLAG_SMITH_REVIEW", base.clone());
@@ -86,8 +84,6 @@ impl SmithConfig {
             confidence_threshold,
             founder_confidence_threshold,
             outcome_confidence_threshold,
-            max_tokens,
-            surveyor_max_tokens,
             base_chain,
         }
     }
@@ -116,7 +112,7 @@ impl SmithConfig {
     pub fn select_chain(&self, skill: &str, grade: u8) -> Vec<String> {
         let mut chain = Vec::new();
         for base in &self.base_chain {
-            let routed = route_smith_command(base, skill, grade, self.max_tokens);
+            let routed = route_smith_command(base, skill, grade, None);
             if !chain.iter().any(|existing| existing == &routed) {
                 chain.push(routed);
             }
@@ -133,13 +129,6 @@ fn parse_non_empty_env(name: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-}
-
-fn parse_max_tokens(name: &str) -> Option<u32> {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .filter(|v| *v > 0)
 }
 
 fn smith_command_from_env(name: &str) -> String {
@@ -345,7 +334,7 @@ fn resolve_smith_chain_alias(
     }
 }
 
-fn route_smith_command(base: &str, skill: &str, grade: u8, max_tokens: Option<u32>) -> String {
+fn route_smith_command(base: &str, skill: &str, grade: u8, effort: Option<&str>) -> String {
     if !supports_claude_routing_flags(base) {
         return base.to_string();
     }
@@ -358,9 +347,9 @@ fn route_smith_command(base: &str, skill: &str, grade: u8, max_tokens: Option<u3
         routed.push(' ');
         routed.push_str(CLAUDE_PLAN_MODE);
     }
-    if let Some(tokens) = max_tokens {
-        if !routed.contains("--max-tokens") {
-            routed.push_str(&format!(" --max-tokens {tokens}"));
+    if let Some(level) = effort {
+        if !routed.contains("--effort") {
+            routed.push_str(&format!(" --effort {level}"));
         }
     }
     routed
@@ -665,21 +654,22 @@ mod tests {
     }
 
     #[test]
-    fn route_smith_command_appends_max_tokens_for_claude() {
-        let routed = route_smith_command(CLAUDE_SMITH_DEFAULT, "default", HIGH_GRADE, Some(16000));
-        assert!(routed.contains("--max-tokens 16000"));
+    fn route_smith_command_appends_effort_for_claude() {
+        let routed =
+            route_smith_command(CLAUDE_SMITH_DEFAULT, "default", HIGH_GRADE, Some("low"));
+        assert!(routed.contains("--effort low"));
     }
 
     #[test]
-    fn route_smith_command_skips_max_tokens_for_non_claude() {
-        let routed = route_smith_command(CODEX_WRAPPER, "default", HIGH_GRADE, Some(16000));
-        assert!(!routed.contains("--max-tokens"));
+    fn route_smith_command_skips_effort_for_non_claude() {
+        let routed = route_smith_command(CODEX_WRAPPER, "default", HIGH_GRADE, Some("low"));
+        assert!(!routed.contains("--effort"));
     }
 
     #[test]
-    fn route_smith_command_no_max_tokens_when_none() {
+    fn route_smith_command_no_effort_when_none() {
         let routed = route_smith_command(CLAUDE_SMITH_DEFAULT, "default", HIGH_GRADE, None);
-        assert!(!routed.contains("--max-tokens"));
+        assert!(!routed.contains("--effort"));
     }
 
     #[test]

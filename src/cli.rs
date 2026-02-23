@@ -68,9 +68,9 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub log_format: Option<LogFormatArg>,
 
-    /// Max output tokens for smith invocations
+    /// Smith effort level (low, medium, high) — controls extended thinking budget
     #[arg(long)]
-    pub max_tokens: Option<u32>,
+    pub effort: Option<String>,
 }
 
 #[derive(Subcommand)]

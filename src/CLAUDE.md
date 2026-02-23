@@ -25,6 +25,15 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #11460 | 11:45 PM | 🔄 | Updated CLI parameter from max_tokens to effort | ~338 |
+| #11459 | " | 🔵 | CLI module still has max_tokens parameter definition | ~334 |
+| #11458 | " | 🔄 | Updated unit tests to validate effort flag instead of max_tokens | ~390 |
+| #11457 | 11:44 PM | 🔴 | Updated route_smith_command to use --effort flag instead of --max-tokens | ~393 |
+| #11456 | " | 🔄 | Removed obsolete parse_max_tokens helper function | ~280 |
+| #11455 | " | 🔴 | Fixed select_chain method to pass None instead of removed max_tokens field | ~286 |
+| #11454 | " | 🔄 | Replaced max_tokens configuration with effort-based approach | ~185 |
+| #11453 | 11:43 PM | 🔴 | Removed max_tokens fields from SmithConfig struct | ~276 |
+| #11452 | " | 🔵 | Slag appends unsupported --max-tokens flag to Claude CLI invocations | ~430 |
 | #11210 | 7:52 PM | ✅ | Smith auto-detection reordered to prioritize Claude first in v1.3.27 default chain | ~678 |
 | #11207 | 7:51 PM | 🔵 | Prompt engineering system with strict output contracts and blueprint injection protection | ~736 |
 | #11201 | 7:50 PM | 🔵 | Proof execution system runs commands via bash -c with piped I/O and safety blocklist | ~591 |

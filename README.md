@@ -10,7 +10,7 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ## What's new in v1.3.30
 
-- **Max output tokens (`--max-tokens`):** Smith invocations now support `--max-tokens N` to cap output tokens, preventing extended-thinking timeouts. Surveyor defaults to 16000 tokens. Configure globally via `SLAG_MAX_TOKENS` or surveyor-specific via `SLAG_SURVEYOR_MAX_TOKENS`.
+- **Effort control (`--effort`):** Smith invocations now support `--effort <level>` (low/medium/high) to control extended thinking budget, preventing surveyor timeouts. Surveyor defaults to `low` effort. Configure globally via `SLAG_EFFORT` or surveyor-specific via `SLAG_SURVEYOR_EFFORT`.
 
 ## What's new in v1.3.29
 
@@ -106,7 +106,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--prompt-policy MODE` | `ask` | Operator prompt behavior: `ask`, `auto-requeue`, `auto-crack`, `auto-abort` |
 | `--prompt-timeout-secs N` | 45 | Prompt timeout before default action |
 | `--log-format FORMAT` | `text` | Output renderer format: `text` or `json` |
-| `--max-tokens N` | unset | Max output tokens for smith invocations (overrides env vars) |
+| `--effort LEVEL` | unset | Smith effort level: `low`, `medium`, `high` (controls extended thinking) |
 
 **Model routing (env):**
 
@@ -130,8 +130,8 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_PROMPT_POLICY` | `ask` | Default operator prompt behavior (`ask`, `auto-requeue`, `auto-crack`, `auto-abort`) |
 | `SLAG_PROMPT_TIMEOUT_SECS` | `45` | Default prompt timeout when flag is not provided |
 | `SLAG_LOG_FORMAT` | `text` | Default log format (`text` or `json`) |
-| `SLAG_MAX_TOKENS` | unset | Max output tokens for smith invocations |
-| `SLAG_SURVEYOR_MAX_TOKENS` | `16000` | Max output tokens for surveyor specifically |
+| `SLAG_EFFORT` | unset | Global smith effort level (`low`, `medium`, `high`) |
+| `SLAG_SURVEYOR_EFFORT` | `low` | Surveyor-specific effort level (controls extended thinking budget) |
 | `SLAG_PROMPT_REPEAT_MODE` | `non-plan` | Prompt repetition mode (`off`, `non-plan`, `always`) |
 | `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
 | `SLAG_PROMPT_REPEAT_MAX_CHARS` | `40000` | Full repetition up to this size; partial tail repetition above |
