@@ -8,7 +8,7 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
-## What's new in v1.3.30
+## What's new in v1.3.31
 
 - **Effort control (`--effort`):** Smith invocations now support `--effort <level>` (low/medium/high) to control extended thinking budget, preventing surveyor timeouts. Surveyor defaults to `low` effort. Configure globally via `SLAG_EFFORT` or surveyor-specific via `SLAG_SURVEYOR_EFFORT`.
 
