@@ -8,6 +8,10 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.30
+
+- **Max output tokens (`--max-tokens`):** Smith invocations now support `--max-tokens N` to cap output tokens, preventing extended-thinking timeouts. Surveyor defaults to 16000 tokens. Configure globally via `SLAG_MAX_TOKENS` or surveyor-specific via `SLAG_SURVEYOR_MAX_TOKENS`.
+
 ## What's new in v1.3.29
 
 - **Commission chunking (quarrier phase):** Large commissions (>500 chars) are automatically decomposed into 2-5 ordered build phases before survey. Each phase runs the full survey → found → forge pipeline independently. Small commissions skip the quarrier entirely.
