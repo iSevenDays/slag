@@ -162,7 +162,7 @@ pub async fn validate_and_queue(
     );
 
     let low_confidence = confidence < confidence_threshold;
-    if malformed_twice || weak_pass_conflict || low_confidence {
+    if recast_allowed && (malformed_twice || weak_pass_conflict || low_confidence) {
         let reason = if malformed_twice && weak_pass_conflict {
             "malformed outcome response retries and weak PASS test"
         } else if malformed_twice {
@@ -347,6 +347,7 @@ pub async fn validate_and_queue(
             &test_cmd,
             &comment,
             requires_browser_test,
+            cycle,
         ));
     }
 
@@ -450,7 +451,7 @@ fn outcome_confidence(
         if looks_like_browser_test(test_cmd) {
             score += 0.20;
         } else {
-            score -= 0.20;
+            score -= 0.10;
         }
     } else if !looks_like_weak_test(test_cmd, false) {
         score += 0.10;
@@ -709,14 +710,40 @@ fn fallback_outcome_test(crucible: &Crucible, requires_browser_test: bool) -> Op
     generic_fallback
 }
 
-fn synthetic_repair_ingot(test_cmd: &str, comment: &str, requires_browser_test: bool) -> Ingot {
+fn sanitize_proof_cmd(cmd: &str) -> String {
+    let mut result = cmd.to_string();
+    // Strip echo "STATUS:PASS" / echo "STATUS:FAIL" and variants — these are
+    // validator output markers, not executable commands.
+    for pattern in &[
+        r#"echo "STATUS:PASS""#,
+        r#"echo "STATUS:FAIL""#,
+        r#"echo 'STATUS:PASS'"#,
+        r#"echo 'STATUS:FAIL'"#,
+        "echo STATUS:PASS",
+        "echo STATUS:FAIL",
+    ] {
+        result = result.replace(pattern, "true");
+    }
+    // Collapse residual `true && true` chains
+    while result.contains("true && true") {
+        result = result.replace("true && true", "true");
+    }
+    result.trim().to_string()
+}
+
+fn synthetic_repair_ingot(test_cmd: &str, comment: &str, requires_browser_test: bool, cycle: usize) -> Ingot {
     let summary = if comment.trim().is_empty() {
         "Outcome validation failed".to_string()
     } else {
         tui::truncate(comment.trim(), 120)
     };
+    let sanitized_proof = if test_cmd.trim().is_empty() {
+        "true".into()
+    } else {
+        sanitize_proof_cmd(test_cmd)
+    };
     Ingot {
-        id: "v_auto".into(),
+        id: format!("v_auto_c{cycle}"),
         status: Status::Ore,
         solo: false,
         grade: if requires_browser_test { 3 } else { 2 },
@@ -728,11 +755,7 @@ fn synthetic_repair_ingot(test_cmd: &str, comment: &str, requires_browser_test: 
         heat: 0,
         max: 5,
         smelt: 0,
-        proof: if test_cmd.trim().is_empty() {
-            "true".into()
-        } else {
-            test_cmd.to_string()
-        },
+        proof: sanitized_proof,
         work: format!(
             "Fix outcome validation failure and make TEST pass: {}",
             summary
@@ -824,6 +847,19 @@ fn read_tail(path: &str, lines: usize) -> String {
     }
 }
 
+fn is_non_browser_testable(text: &str) -> bool {
+    text.contains("chrome extension")
+        || text.contains("browser extension")
+        || text.contains("firefox extension")
+        || text.contains("safari extension")
+        || text.contains("manifest v3")
+        || text.contains("manifest v2")
+        || text.contains("mv3")
+        || text.contains("content script")
+        || text.contains("background service worker")
+        || text.contains("popup.html")
+}
+
 fn likely_browser_outcome(ore: &str, blueprint: &str, crucible: &str) -> bool {
     let text = format!(
         "{}\n{}\n{}",
@@ -831,9 +867,13 @@ fn likely_browser_outcome(ore: &str, blueprint: &str, crucible: &str) -> bool {
         blueprint.to_lowercase(),
         crucible.to_lowercase()
     );
+    if is_non_browser_testable(&text) {
+        return false;
+    }
     text.contains(":skill web")
-        || text.contains("web")
-        || text.contains("browser")
+        || text.contains("web app")
+        || text.contains("webapp")
+        || text.contains("website")
         || text.contains("frontend")
         || text.contains("three.js")
         || text.contains("3d")
@@ -1054,6 +1094,31 @@ TEST: npm test
             "No UI",
             "(ingot :skill default)"
         ));
+        // Bare "web" no longer triggers — must be "web app", "webapp", or "website"
+        assert!(!likely_browser_outcome(
+            "Build a web scraper",
+            "CLI tool",
+            "(ingot :skill default)"
+        ));
+        assert!(likely_browser_outcome(
+            "Build a web app",
+            "React frontend",
+            "(ingot :skill web)"
+        ));
+    }
+
+    #[test]
+    fn browser_outcome_excludes_extensions() {
+        assert!(!likely_browser_outcome(
+            "Build a Chrome extension for auto-reply",
+            "Manifest V3 browser extension",
+            "(ingot :skill web)"
+        ));
+        assert!(!likely_browser_outcome(
+            "Firefox extension for tab management",
+            "Uses content script and popup.html",
+            "(ingot :skill default)"
+        ));
     }
 
     #[test]
@@ -1082,10 +1147,36 @@ TEST: npm test
 
     #[test]
     fn synthetic_repair_is_web_for_browser_outcomes() {
-        let repair = synthetic_repair_ingot("npx playwright test", "No snakes visible", true);
+        let repair = synthetic_repair_ingot("npx playwright test", "No snakes visible", true, 1);
         assert_eq!(repair.skill, Skill::Web);
         assert_eq!(repair.grade, 3);
         assert_eq!(repair.status, Status::Ore);
+        assert_eq!(repair.id, "v_auto_c1");
+    }
+
+    #[test]
+    fn sanitize_proof_cmd_strips_echo_status() {
+        assert_eq!(
+            sanitize_proof_cmd(r#"echo "STATUS:PASS" && npm test"#),
+            "true && npm test"
+        );
+        assert_eq!(
+            sanitize_proof_cmd(r#"echo "STATUS:PASS""#),
+            "true"
+        );
+        assert_eq!(
+            sanitize_proof_cmd(r#"echo "STATUS:FAIL" && echo "STATUS:PASS""#),
+            "true"
+        );
+        assert_eq!(sanitize_proof_cmd("npm test"), "npm test");
+    }
+
+    #[test]
+    fn synthetic_repair_cycle_aware_ids() {
+        let r1 = synthetic_repair_ingot("npm test", "fail", false, 2);
+        assert_eq!(r1.id, "v_auto_c2");
+        let r2 = synthetic_repair_ingot("npm test", "fail", false, 5);
+        assert_eq!(r2.id, "v_auto_c5");
     }
 
     #[test]

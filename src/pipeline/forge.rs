@@ -763,6 +763,8 @@ async fn strike_ingot(
     let branch_name = format!("forge/{}", ingot.id);
     let mut protocol_cmd_fail_count = 0u8;
     let mut smith_invoke_fail_count = 0u8;
+    let mut consecutive_identical_failures = 0u8;
+    let mut last_failure_sig = String::new();
 
     // Create worktree if in worktree mode
     if worktree_mode {
@@ -812,6 +814,30 @@ async fn strike_ingot(
     }
 
     for heat in 1..=ingot.max {
+        // Check for identical consecutive failures from previous heat
+        if let Some(ref slag_msg) = slag {
+            let sig = failure_signature(slag_msg);
+            if sig == last_failure_sig && !last_failure_sig.is_empty() {
+                consecutive_identical_failures = consecutive_identical_failures.saturating_add(1);
+                if consecutive_identical_failures >= 3 {
+                    if !output_mode.is_quiet() {
+                        tui::status_line(
+                            "↺",
+                            tui::WARM,
+                            &format!(
+                                "{} identical failures, bailing to resmelt",
+                                consecutive_identical_failures
+                            ),
+                        );
+                    }
+                    break;
+                }
+            } else {
+                consecutive_identical_failures = 1;
+                last_failure_sig = sig;
+            }
+        }
+
         // Re-read the ingot before each heat so retries use the latest proof/work.
         // This prevents stale forge orders when PLAN.md was updated in a prior heat.
         refresh_ingot_from_crucible(&mut active_ingot);
@@ -1048,6 +1074,19 @@ fn is_smith_failover_candidate(err: &SlagError) -> bool {
         }
         _ => false,
     }
+}
+
+fn failure_signature(output: &str) -> String {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .chars()
+        .take(200)
+        .collect()
 }
 
 fn is_protocol_placeholder_cmd(cmd: &str) -> bool {
@@ -1432,6 +1471,41 @@ mod tests {
         assert_eq!(reloaded.get("c1").unwrap().status, Status::Cracked); // skipped (proof=="true")
         assert_eq!(reloaded.get("c2").unwrap().status, Status::Forged); // promoted
         assert_eq!(reloaded.get("c3").unwrap().status, Status::Cracked); // failed
+    }
+
+    #[tokio::test]
+    async fn strike_ingot_bails_early_on_identical_failures() {
+        let mut ingot = mk_ingot("i_bail", Status::Ore);
+        ingot.max = 5;
+        ingot.proof = "false".to_string(); // always fails
+        // Smith returns valid CMD that passes, but proof always fails → identical slag messages
+        let smith = MockSmith::new(vec![
+            "CMD: true\n".to_string(),
+            "CMD: true\n".to_string(),
+            "CMD: true\n".to_string(),
+            "CMD: true\n".to_string(),
+            "CMD: true\n".to_string(),
+        ]);
+
+        let result = strike_ingot(&ingot, &smith, "mock-smith", false, OutputMode::Quiet).await;
+        match result {
+            Err(SlagError::IngotCracked(id, _)) => {
+                assert_eq!(id, "i_bail");
+                // Should have bailed after 3 identical failures (heat 4), not gone all 5
+                assert!(smith.call_count() <= 4, "should bail before max heats");
+            }
+            other => panic!("expected IngotCracked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn failure_signature_extracts_first_lines() {
+        let output = "\n  error: something broke\n  at line 42\n  in file.rs\nextra line\n";
+        let sig = failure_signature(output);
+        assert!(sig.contains("error: something broke"));
+        assert!(sig.contains("at line 42"));
+        assert!(sig.contains("in file.rs"));
+        assert!(!sig.contains("extra line"));
     }
 
     #[tokio::test]

@@ -8,6 +8,15 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.28
+
+- **Sanitized synthetic repair proofs:** outcome validator no longer assigns `echo "STATUS:PASS"` as proof commands — these validator output markers are stripped before creating synthetic repair ingots.
+- **Extension exclusion from browser tests:** Chrome/Firefox/Safari extensions and Manifest V3 projects are no longer flagged as browser-testable, preventing impossible Playwright/screenshot requirements.
+- **Subagent timeout guard:** when the primary outcome validator times out, slag no longer escalates to a 90s subagent call — total dead time reduced from 270s to 180s.
+- **Identical-failure early bail:** after 3 consecutive identical failures in the heat loop, slag bails to resmelt instead of burning remaining heats on the same error.
+- **Cycle-aware repair IDs:** synthetic repair ingots now use `v_auto_c{cycle}` IDs to avoid naming confusion across outcome cycles.
+- **Softer confidence penalties:** browser test mismatch penalty reduced from -0.20 to -0.10, preventing impossible-to-reach confidence thresholds for non-Playwright-testable outcomes.
+
 ## What's new in v1.3.27
 
 - **Claude is now the default smith:** auto-detection priority reordered to `claude` first, so slag works out of the box without alternative CLIs.
