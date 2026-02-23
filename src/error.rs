@@ -44,6 +44,9 @@ pub enum SlagError {
     #[error("outcome validation failed: {0}")]
     OutcomeFailed(String),
 
+    #[error("quarrier failed: {0}")]
+    QuarryFailed(String),
+
     #[error("operator aborted: {0}")]
     OperatorAbort(String),
 

@@ -20,4 +20,13 @@
 | #3798 | 4:21 PM | 🔵 | Resmelt Failure Recovery | ~117 |
 | #3792 | 4:20 PM | 🔵 | Forge Phase Implementation | ~162 |
 | #3789 | " | 🔵 | Pipeline Architecture Analysis | ~149 |
+
+### Feb 23, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #11216 | 7:53 PM | 🔵 | Strike ingot heat loop has 5 distinct failure paths all using slag message continuation pattern | ~526 |
+| #11213 | " | 🔵 | Subagent escalation lacks recast_allowed guard enabling timeout cascade | ~542 |
+| #11212 | 7:52 PM | 🔵 | Confirmed vulnerable synthetic_repair_ingot implementation at line 712 | ~506 |
+| #11203 | 7:50 PM | 🔵 | Forge pipeline implements smith failover chain with usage/rate limit detection | ~723 |
 </claude-mem-context>

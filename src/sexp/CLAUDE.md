@@ -17,4 +17,10 @@
 | #3821 | 4:24 PM | ⚖️ | Status Enum Extension Decision | ~105 |
 | #3819 | " | 🔵 | S-expression Parser Implementation | ~119 |
 | #3807 | 4:22 PM | 🔵 | Ingot Status and Skill Enums | ~102 |
+
+### Feb 23, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #11205 | 7:51 PM | 🔵 | Ingot state machine with four lifecycle statuses and skill-based smith routing | ~549 |
 </claude-mem-context>

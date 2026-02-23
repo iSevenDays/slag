@@ -52,6 +52,10 @@ pub struct Cli {
     #[arg(long)]
     pub no_outcome: bool,
 
+    /// Disable commission chunking (quarrier phase)
+    #[arg(long)]
+    pub no_quarry: bool,
+
     /// Operator prompt policy (ask|auto-requeue|auto-crack|auto-abort)
     #[arg(long, value_enum)]
     pub prompt_policy: Option<PromptPolicyArg>,

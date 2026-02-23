@@ -6,6 +6,7 @@ pub const CRUCIBLE: &str = "PLAN.md";
 pub const ORE_FILE: &str = "PRD.md";
 pub const ALLOY_FILE: &str = "AGENTS.md";
 pub const LEDGER: &str = "PROGRESS.md";
+pub const PHASES_FILE: &str = "PHASES.md";
 pub const LOG_DIR: &str = "logs";
 
 /// Behavior constants
@@ -482,6 +483,8 @@ pub struct PipelineConfig {
     pub prompt_timeout_secs: u64,
     /// Terminal log renderer format
     pub log_format: LogFormat,
+    /// Disable commission chunking (quarrier phase)
+    pub no_quarry: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -694,6 +697,7 @@ impl PipelineConfig {
         prompt_policy: PromptPolicy,
         prompt_timeout_secs: u64,
         log_format: LogFormat,
+        no_quarry: bool,
     ) -> Self {
         Self {
             worktree,
@@ -708,6 +712,7 @@ impl PipelineConfig {
             prompt_policy,
             prompt_timeout_secs,
             log_format,
+            no_quarry,
         }
     }
 

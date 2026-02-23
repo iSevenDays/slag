@@ -209,6 +209,29 @@ pub fn surveyor_prompt(ore: &str) -> String {
     )
 }
 
+/// Build the quarrier prompt — decomposes a large commission into 2-5 ordered build phases.
+pub fn quarrier_prompt(ore: &str) -> String {
+    format!(
+        "ROLE: Master Quarrier. Decompose this commission into 2-5 ordered build phases.\n\n\
+        COMMISSION:\n{ore}\n\n\
+        Each phase must be independently demonstrable and ordered by dependency.\n\
+        Phase 1 is always foundation (project setup, core deps, config).\n\
+        Later phases build on earlier ones.\n\n\
+        OUTPUT FORMAT (exactly, one block per phase, separated by ---):\n\
+        PHASE: <short name>\n\
+        DESC: <1-2 sentence description of what this phase delivers>\n\
+        CRITERIA: <shell command or check that proves this phase is done>\n\
+        ---\n\n\
+        RULES:\n\
+        - 2-5 phases total\n\
+        - Phase 1 = foundation/setup\n\
+        - Each phase produces a working, testable increment\n\
+        - Order phases by dependency (later phases depend on earlier)\n\
+        - NO questions, NO prose, NO markdown\n\
+        - Output ONLY the PHASE/DESC/CRITERIA blocks separated by ---\n"
+    )
+}
+
 /// Build the founder prompt
 pub fn founder_prompt(ore: &str, blueprint: &str) -> String {
     format!(

@@ -63,6 +63,7 @@ async fn main() {
         prompt_policy,
         prompt_timeout_secs,
         log_format,
+        cli.no_quarry,
     );
 
     let result = match cli.command {

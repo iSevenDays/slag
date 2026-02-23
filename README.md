@@ -8,6 +8,12 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.29
+
+- **Commission chunking (quarrier phase):** Large commissions (>500 chars) are automatically decomposed into 2-5 ordered build phases before survey. Each phase runs the full survey → found → forge pipeline independently. Small commissions skip the quarrier entirely.
+- **Resume support:** Quarried phases are persisted to `PHASES.md`. If a run is interrupted mid-phase, `slag resume` picks up from where it stopped.
+- **`--no-quarry` flag:** Disable commission chunking to force single-pass behavior (old behavior).
+
 ## What's new in v1.3.28
 
 - **Sanitized synthetic repair proofs:** outcome validator no longer assigns `echo "STATUS:PASS"` as proof commands — these validator output markers are stripped before creating synthetic repair ingots.
@@ -92,6 +98,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--retry N` | 3 | Max retry cycles when ingots crack (0 = no retry) |
 | `--verbose` (`--debug`) | off | Show detailed forge output (commands, retries, extended previews, and stall heartbeats) |
 | `--no-outcome` | off | Disable independent outcome-validation closing loop |
+| `--no-quarry` | off | Disable commission chunking (quarrier phase) |
 | `--prompt-policy MODE` | `ask` | Operator prompt behavior: `ask`, `auto-requeue`, `auto-crack`, `auto-abort` |
 | `--prompt-timeout-secs N` | 45 | Prompt timeout before default action |
 | `--log-format FORMAT` | `text` | Output renderer format: `text` or `json` |
@@ -162,6 +169,7 @@ slag uses metallurgical vocabulary. Here's the dictionary.
 | **Ingot** | A single task encoded as an S-expression | One line in `PLAN.md` |
 | **Crucible** | The file holding all ingots | `PLAN.md` |
 | **Blueprint** | Architecture analysis and forging plan | `BLUEPRINT.md` |
+| **Quarrier** | Pre-survey decomposer that splits large commissions into phases | `PHASES.md` |
 | **Anvil** | A parallel execution slot (background process) | In-memory |
 | **Smith** | The AI agent that does the work (configured smith CLI) | CLI invocation |
 | **Slag heap** | Debug logs dumped during forging | `logs/` directory |
@@ -176,6 +184,7 @@ slag uses metallurgical vocabulary. Here's the dictionary.
 
 | Term | What it does | Phase |
 |------|-------------|-------|
+| **Quarry** | Decompose large commissions into ordered build phases | Phase 0 |
 | **Survey** | Analyze requirements, produce blueprint | Phase 1 |
 | **Found** | Design and cast ingots from blueprint | Phase 2 |
 | **Forge** | Execute an ingot: strike, run commands, verify | Phase 3 |
@@ -200,11 +209,11 @@ ore --> molten --> forged
 
 ## How it works
 
-slag runs a 5-phase pipeline (6 phases with `--worktree`):
+slag runs a 5-phase pipeline (6 phases with `--worktree`). Large commissions add a Phase 0 quarrier that splits into 2-5 build phases:
 
 ```
-PRD.md --> SURVEYOR --> BLUEPRINT.md --> FOUNDER --> PLAN.md --> FORGE --> OUTCOME --> PROGRESS.md
- (ore)    (analyze)    (blueprint)     (design)   (crucible)  (strike)   (validate)   (ledger)
+PRD.md --> [QUARRIER] --> SURVEYOR --> BLUEPRINT.md --> FOUNDER --> PLAN.md --> FORGE --> OUTCOME --> PROGRESS.md
+ (ore)    (decompose)    (analyze)    (blueprint)     (design)   (crucible)  (strike)   (validate)   (ledger)
 
 With --worktree (master review enabled):
 PRD.md --> SURVEYOR --> FOUNDER --> FORGE (branches) --> REVIEW --> OUTCOME --> ASSAY
@@ -314,6 +323,7 @@ Final report. Counts forged vs cracked, writes results to `PROGRESS.md`.
 | `BLUEPRINT.md` | Surveyor analysis |
 | `PLAN.md` | Ingot crucible (task list) |
 | `PROGRESS.md` | Work history ledger |
+| `PHASES.md` | Quarried build phases (multi-phase runs) |
 | `AGENTS.md` | Agent recipe docs |
 | `logs/` | Debug logs (slag heap) |
 
