@@ -70,11 +70,19 @@ async fn main() {
         Some(Command::Status) => show_status(),
         Some(Command::Update) => update::self_update().await,
         Some(Command::Resume) => {
-            let smith_config = SmithConfig::from_env();
+            let mut smith_config = SmithConfig::from_env();
+            if let Some(t) = cli.max_tokens {
+                smith_config.max_tokens = Some(t);
+                smith_config.surveyor_max_tokens = Some(t);
+            }
             pipeline::run(None, &smith_config, &pipeline_config).await
         }
         None => {
-            let smith_config = SmithConfig::from_env();
+            let mut smith_config = SmithConfig::from_env();
+            if let Some(t) = cli.max_tokens {
+                smith_config.max_tokens = Some(t);
+                smith_config.surveyor_max_tokens = Some(t);
+            }
             let commission = cli.commission_text();
             pipeline::run(commission.as_deref(), &smith_config, &pipeline_config).await
         }

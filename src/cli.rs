@@ -67,6 +67,10 @@ pub struct Cli {
     /// Log renderer format (text or json)
     #[arg(long, value_enum)]
     pub log_format: Option<LogFormatArg>,
+
+    /// Max output tokens for smith invocations
+    #[arg(long)]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Subcommand)]

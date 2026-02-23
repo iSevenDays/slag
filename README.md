@@ -102,6 +102,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--prompt-policy MODE` | `ask` | Operator prompt behavior: `ask`, `auto-requeue`, `auto-crack`, `auto-abort` |
 | `--prompt-timeout-secs N` | 45 | Prompt timeout before default action |
 | `--log-format FORMAT` | `text` | Output renderer format: `text` or `json` |
+| `--max-tokens N` | unset | Max output tokens for smith invocations (overrides env vars) |
 
 **Model routing (env):**
 
@@ -125,6 +126,8 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_PROMPT_POLICY` | `ask` | Default operator prompt behavior (`ask`, `auto-requeue`, `auto-crack`, `auto-abort`) |
 | `SLAG_PROMPT_TIMEOUT_SECS` | `45` | Default prompt timeout when flag is not provided |
 | `SLAG_LOG_FORMAT` | `text` | Default log format (`text` or `json`) |
+| `SLAG_MAX_TOKENS` | unset | Max output tokens for smith invocations |
+| `SLAG_SURVEYOR_MAX_TOKENS` | `16000` | Max output tokens for surveyor specifically |
 | `SLAG_PROMPT_REPEAT_MODE` | `non-plan` | Prompt repetition mode (`off`, `non-plan`, `always`) |
 | `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
 | `SLAG_PROMPT_REPEAT_MAX_CHARS` | `40000` | Full repetition up to this size; partial tail repetition above |
