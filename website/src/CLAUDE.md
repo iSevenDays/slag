@@ -7,23 +7,10 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #2942 | 5:50 PM | 🟣 | Deployed front-end improvements to production at https://slag.dev | ~276 |
-| #2938 | 5:34 PM | ✅ | Changed table cell vertical alignment from top to middle | ~138 |
-| #2937 | " | 🔄 | Simplified table styling back to basic format | ~266 |
-| #2936 | 5:33 PM | 🟣 | Added styling for section separators between page sections | ~201 |
-| #2935 | " | ✅ | Increased phase card padding for better spacing | ~167 |
-| #2934 | 5:32 PM | ✅ | Deployed front-end changes to Cloudflare Pages production environment | ~246 |
-| #2933 | 5:28 PM | ✅ | Committed front-end UI polish changes to slag website | ~272 |
-| #2931 | 5:27 PM | ✅ | Improved table formatting with better spacing and borders | ~278 |
-| #2930 | 5:26 PM | 🟣 | Added color-coded styling to workflow bar items | ~224 |
-| #2928 | " | 🟣 | Added subtle background tints to Four Phases cards | ~210 |
-| #2927 | " | ✅ | Added vertical padding to Pipeline and Forge Loop diagram sections | ~157 |
-| #2926 | 5:25 PM | ✅ | Reduced heat shimmer effect intensity on forge header | ~168 |
-| #2924 | " | ✅ | Reduced edge glow opacity on forge header | ~149 |
-| #2922 | " | ✅ | Reduced hover glow intensity on forge header | ~162 |
-| #2921 | " | ✅ | Reduced forge header glow intensity | ~161 |
-| #2920 | " | 🔴 | Removed floating ember animations from forge header | ~173 |
-| #2919 | " | 🔴 | Added cursor pointer to copy buttons and interactive elements | ~167 |
-| #2869 | 4:44 PM | 🔵 | Planning Phase Complete for slag Landing Page Recreation | ~323 |
-| #2866 | " | 🔵 | Current Styling System Analyzed from main.css | ~293 |
+| #2675 | 3:40 PM | 🟣 | Added easter egg hover animation to footer | ~188 |
+| #2546 | 3:22 PM | 🟣 | Added markdown copy button functionality to website | ~224 |
+| #2541 | 3:21 PM | 🟣 | Added copy-as-markdown functionality to website | ~241 |
+| #2539 | " | 🟣 | Added Copy as Markdown button with fixed positioning and hover states | ~285 |
+| #2538 | " | 🔵 | Website JavaScript initializes copy buttons and renders example ingots | ~268 |
+| #2537 | " | 🔵 | Production website CSS uses 100ch max-width and slag color palette | ~258 |
 </claude-mem-context>

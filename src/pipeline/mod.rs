@@ -137,6 +137,21 @@ pub async fn run(
         let crucible = Crucible::load(crucible_path)?;
         let counts = crucible.counts();
 
+        // Re-run proofs for cracked ingots — earlier forged ingots may have
+        // already satisfied the work, so we can promote without a smith call.
+        let promoted = forge::post_forge_proof_reeval(crucible_path).await?;
+        let (_crucible, counts) = if promoted > 0 {
+            println!(
+                "  \x1b[1;37m⤴\x1b[0m promoted {} cracked ingot(s) to forged via proof re-eval",
+                promoted
+            );
+            let c = Crucible::load(crucible_path)?;
+            let n = c.counts();
+            (c, n)
+        } else {
+            (crucible, counts)
+        };
+
         if counts.cracked == 0 {
             if pipeline_config.outcome_gate {
                 let validator = ClaudeSmith::new(smith_config.outcome.clone());

@@ -225,6 +225,9 @@ where
 {
     let mut chain = Vec::new();
     let has_kimi = has_cmd("kimi");
+    if has_cmd("claude") {
+        chain.push(CLAUDE_SMITH_DEFAULT.to_string());
+    }
     if has_kimi && kimi_claude_compat {
         chain.push(KIMI_CLAUDE_WRAPPER.to_string());
     }
@@ -236,9 +239,6 @@ where
     }
     if has_cmd("opencode") {
         chain.push(OPENCODE_WRAPPER.to_string());
-    }
-    if has_cmd("claude") {
-        chain.push(CLAUDE_SMITH_DEFAULT.to_string());
     }
     if has_kimi {
         let cmd = if kimi_native && !kimi_claude_compat {
@@ -547,9 +547,9 @@ mod tests {
     }
 
     #[test]
-    fn detected_smith_prefers_kimi_claude_wrapper_when_non_native() {
+    fn detected_smith_prefers_claude_over_kimi_claude_wrapper() {
         let selected = choose_detected_smith(|cmd| cmd == "kimi" || cmd == "claude", false, true);
-        assert_eq!(selected, Some(KIMI_CLAUDE_WRAPPER.to_string()));
+        assert_eq!(selected, Some(CLAUDE_SMITH_DEFAULT.to_string()));
     }
 
     #[test]
@@ -559,9 +559,9 @@ mod tests {
     }
 
     #[test]
-    fn detected_smith_prefers_codex_before_claude() {
+    fn detected_smith_prefers_claude_before_codex() {
         let selected = choose_detected_smith(|cmd| cmd == "codex" || cmd == "claude", false, false);
-        assert_eq!(selected, Some(CODEX_WRAPPER.to_string()));
+        assert_eq!(selected, Some(CLAUDE_SMITH_DEFAULT.to_string()));
     }
 
     #[test]
@@ -592,9 +592,9 @@ mod tests {
         assert_eq!(
             chain,
             vec![
+                CLAUDE_SMITH_DEFAULT.to_string(),
                 KIMI_CLAUDE_WRAPPER.to_string(),
-                CODEX_WRAPPER.to_string(),
-                CLAUDE_SMITH_DEFAULT.to_string()
+                CODEX_WRAPPER.to_string()
             ]
         );
     }

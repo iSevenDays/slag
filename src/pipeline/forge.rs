@@ -1042,6 +1042,9 @@ fn is_smith_failover_candidate(err: &SlagError) -> bool {
                 || msg.contains("exit 126")
                 || msg.contains("exit 127")
                 || msg.contains("failed to spawn")
+                || msg.contains("usage limit")
+                || msg.contains("rate limit")
+                || msg.contains("try again at")
         }
         _ => false,
     }
@@ -1175,6 +1178,53 @@ fn log_to_file(label: &str, content: &str) {
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = format!("{}/{ts}_{label}.log", crate::config::LOG_DIR);
     let _ = std::fs::write(&path, content);
+}
+
+/// Post-forge proof re-evaluation: re-run :proof for every cracked ingot.
+/// If the proof now passes (e.g. an earlier forged ingot already made the change),
+/// promote the ingot to forged without invoking a smith. Returns promoted count.
+pub async fn post_forge_proof_reeval(crucible_path: &Path) -> Result<usize, SlagError> {
+    let crucible = Crucible::load(crucible_path)?;
+    let cracked: Vec<(String, String)> = crucible
+        .ingots
+        .iter()
+        .filter(|i| i.status == Status::Cracked)
+        .map(|i| (i.id.clone(), i.proof.clone()))
+        .collect();
+
+    if cracked.is_empty() {
+        return Ok(0);
+    }
+
+    let mut promoted = 0usize;
+    let mut crucible = crucible;
+
+    for (id, proof_cmd) in &cracked {
+        if proof_cmd.is_empty() || proof_cmd == "true" {
+            continue;
+        }
+        let (ok, _output) = proof::run_shell(proof_cmd).await;
+        if ok {
+            if let Some(ingot) = crucible.get_mut(id) {
+                ingot.status = Status::Forged;
+                promoted += 1;
+                events::emit_info(
+                    "forge.proof_reeval.promoted",
+                    "cracked ingot promoted to forged via proof re-evaluation",
+                    serde_json::json!({
+                        "id": id,
+                        "proof": proof_cmd,
+                    }),
+                );
+            }
+        }
+    }
+
+    if promoted > 0 {
+        crucible.save()?;
+    }
+
+    Ok(promoted)
 }
 
 #[cfg(test)]
@@ -1352,6 +1402,36 @@ mod tests {
             }
             other => panic!("expected smith protocol failure, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn post_forge_proof_reeval_promotes_passing_cracked_ingots() {
+        let tmp = NamedTempFile::new().expect("tmp file");
+        let mut cracked_pass = mk_ingot("c1", Status::Cracked);
+        cracked_pass.proof = "true".to_string(); // trivial proof, skipped
+
+        let mut cracked_real_pass = mk_ingot("c2", Status::Cracked);
+        cracked_real_pass.proof = "test 1 -eq 1".to_string(); // will pass
+
+        let mut cracked_fail = mk_ingot("c3", Status::Cracked);
+        cracked_fail.proof = "false".to_string(); // will fail
+
+        let forged = mk_ingot("f1", Status::Forged);
+
+        let crucible = Crucible::new(
+            tmp.path(),
+            vec![forged, cracked_pass, cracked_real_pass, cracked_fail],
+        );
+        crucible.save().expect("save");
+
+        let promoted = post_forge_proof_reeval(tmp.path()).await.expect("reeval");
+        assert_eq!(promoted, 1, "only c2 should be promoted");
+
+        let reloaded = Crucible::load(tmp.path()).expect("reload");
+        assert_eq!(reloaded.get("f1").unwrap().status, Status::Forged);
+        assert_eq!(reloaded.get("c1").unwrap().status, Status::Cracked); // skipped (proof=="true")
+        assert_eq!(reloaded.get("c2").unwrap().status, Status::Forged); // promoted
+        assert_eq!(reloaded.get("c3").unwrap().status, Status::Cracked); // failed
     }
 
     #[tokio::test]

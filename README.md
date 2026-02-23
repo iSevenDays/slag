@@ -8,6 +8,15 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.27
+
+- **Claude is now the default smith:** auto-detection priority reordered to `claude` first, so slag works out of the box without alternative CLIs.
+- **Usage-limit failover:** when any smith hits a usage or rate limit, slag automatically fails over to the next smith in the chain instead of crashing.
+
+## What's new in v1.3.26
+
+- **Post-forge proof re-evaluation:** after each forge cycle, slag re-runs the `:proof` command for every cracked ingot. If the proof passes (because an earlier forged ingot already made the needed change), the cracked ingot is promoted to forged without invoking a smith. This eliminates entire retry cycles when overlapping ingots target the same files.
+
 ## What's new in v1.3.25
 
 - **Sandbox failure detection:** analysis now recognizes read-only sandbox errors (`READ_ONLY_SANDBOX`, `filesystem writes are blocked`, `operation not permitted`) and immediately skips instead of retrying indefinitely.
@@ -82,7 +91,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SLAG_SMITH` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Main smith for survey/founder/forge |
+| `SLAG_SMITH` | auto-detected (`claude` / `kimi` Claude-compatible / `codex` / `gemini` / `opencode`; native `kimi` fallback) | Main smith for survey/founder/forge |
 | `SLAG_SMITH_CHAIN` | auto-generated from detected smiths | Comma-separated fallback chain for forge smith failover (aliases: `kimi`, `codex`, `gemini`, `opencode`, `claude`) |
 | `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
@@ -90,7 +99,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_SMITH_RECOVERY` | `SLAG_SMITH` | Override model/flags for analysis/re-smelt/reconsider phases |
 | `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
 | `SLAG_SMITH_INDEPENDENT` | unset (disabled) | Optional independent fallback smith for recovery escalation after rejected re-smelt/reconsider output |
-| `SLAG_SMITH_SUBAGENT` | auto-detected (`kimi` Claude-compatible / `codex` / `gemini` / `opencode` / `claude`; native `kimi` fallback) | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
+| `SLAG_SMITH_SUBAGENT` | auto-detected (`claude` / `kimi` Claude-compatible / `codex` / `gemini` / `opencode`; native `kimi` fallback) | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
 | `SLAG_CONFIDENCE_THRESHOLD` | `0.65` | Global default threshold for uncertainty escalation |
 | `SLAG_FOUNDER_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Founder-specific escalation threshold |
 | `SLAG_OUTCOME_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Outcome-specific escalation threshold |
@@ -105,7 +114,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_PROMPT_REPEAT_MAX_CHARS` | `40000` | Full repetition up to this size; partial tail repetition above |
 
 When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
-`kimi` (Claude-compatible), `codex`, `gemini`, `opencode`, `claude`, then native `kimi` as last fallback.
+`claude`, `kimi` (Claude-compatible), `codex`, `gemini`, `opencode`, then native `kimi` as last fallback.
 
 Forge now uses a runtime failover chain: if the active smith hard-fails protocol/invocation for an ingot, slag retries that ingot on the next smith in `SLAG_SMITH_CHAIN` automatically.
 
@@ -236,13 +245,14 @@ Use `--ci-only` to skip AI review and auto-merge on CI pass. Use `--skip-review`
 
 When ingots crack, slag analyzes failures and can retry automatically (up to `--retry N` cycles):
 
-1. **Failure detection** -- identifies patterns: missing dependencies, protocol failures, proof mismatches, JSON errors, sandbox/permission blocks
-2. **Fix application** -- converts parallel ingots to sequential if they have dependencies
-3. **Strict retry contract** -- repaired ingots must change approach, keep concrete proofs, and avoid failed proof signatures
-4. **Independent fallback lane** -- optional escalation to `SLAG_SMITH_INDEPENDENT` if primary repair output is rejected
-5. **Regeneration** -- uses founder to regenerate ingots that can't be fixed simply
-6. **Retry** -- re-runs forge with fixed/regenerated ingots
-7. **Force retry prompt** -- when no recoverable ingots found, asks user to confirm force retry
+1. **Proof re-evaluation** -- re-runs `:proof` for every cracked ingot; promotes to forged if proof now passes (zero-cost check that eliminates overlapping work)
+2. **Failure detection** -- identifies patterns: missing dependencies, protocol failures, proof mismatches, JSON errors, sandbox/permission blocks
+3. **Fix application** -- converts parallel ingots to sequential if they have dependencies
+4. **Strict retry contract** -- repaired ingots must change approach, keep concrete proofs, and avoid failed proof signatures
+5. **Independent fallback lane** -- optional escalation to `SLAG_SMITH_INDEPENDENT` if primary repair output is rejected
+6. **Regeneration** -- uses founder to regenerate ingots that can't be fixed simply
+7. **Retry** -- re-runs forge with fixed/regenerated ingots
+8. **Force retry prompt** -- when no recoverable ingots found, asks user to confirm force retry
 
 This loop continues until all ingots forge, max retries exhausted, or user declines force retry.
 
