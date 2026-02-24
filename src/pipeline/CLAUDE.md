@@ -29,4 +29,14 @@
 | #11213 | " | 🔵 | Subagent escalation lacks recast_allowed guard enabling timeout cascade | ~542 |
 | #11212 | 7:52 PM | 🔵 | Confirmed vulnerable synthetic_repair_ingot implementation at line 712 | ~506 |
 | #11203 | 7:50 PM | 🔵 | Forge pipeline implements smith failover chain with usage/rate limit detection | ~723 |
+
+### Feb 24, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #11679 | 12:21 PM | 🔵 | Pipeline module run function not found with relaxed visibility search | ~298 |
+| #11676 | " | 🔵 | Pipeline run function not found with "pub async fn run" signature | ~301 |
+| #11674 | " | 🔵 | Pipeline module does not expose run function with expected signature | ~285 |
+| #11609 | 12:12 PM | 🔵 | Surveyor implementation delegates timeout handling to Smith trait layer | ~429 |
+| #11606 | 12:11 PM | 🔵 | No timeout configuration found in surveyor.rs implementation | ~302 |
 </claude-mem-context>

@@ -8,4 +8,11 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #3809 | 4:23 PM | 🔵 | Smith Trait and Self-Iteration | ~91 |
+
+### Feb 24, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #11607 | 12:12 PM | 🔵 | Smith timeout implementation uses tokio timeout wrapper on child process | ~482 |
+| #11605 | 12:11 PM | 🔵 | Found surveyor timeout configured at 300s via SLAG_SMITH_TIMEOUT_SECS | ~386 |
 </claude-mem-context>

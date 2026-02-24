@@ -157,13 +157,13 @@ fn should_quarry(pipeline_config: &PipelineConfig) -> bool {
     if pipeline_config.no_quarry {
         return false;
     }
-    // Already mid-run: blueprint exists
-    if std::path::Path::new(crate::config::BLUEPRINT).exists() {
-        return false;
-    }
-    // Resume: PHASES.md exists
+    // Resume: PHASES.md exists — always honour quarried phases even mid-run
     if std::path::Path::new(crate::config::PHASES_FILE).exists() {
         return true;
+    }
+    // Already mid-run: blueprint exists (single-phase run)
+    if std::path::Path::new(crate::config::BLUEPRINT).exists() {
+        return false;
     }
     // Large commission: ore > 300 chars
     let ore = std::fs::read_to_string(crate::config::ORE_FILE).unwrap_or_default();

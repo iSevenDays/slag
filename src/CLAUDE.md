@@ -25,7 +25,9 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #11460 | 11:45 PM | 🔄 | Updated CLI parameter from max_tokens to effort | ~338 |
+| #11462 | 11:46 PM | 🔄 | Removed broken CLI max_tokens override logic from main.rs | ~389 |
+| #11461 | 11:45 PM | 🔵 | Main module has outdated CLI-to-config wiring for max_tokens | ~388 |
+| #11460 | " | 🔄 | Updated CLI parameter from max_tokens to effort | ~338 |
 | #11459 | " | 🔵 | CLI module still has max_tokens parameter definition | ~334 |
 | #11458 | " | 🔄 | Updated unit tests to validate effort flag instead of max_tokens | ~390 |
 | #11457 | 11:44 PM | 🔴 | Updated route_smith_command to use --effort flag instead of --max-tokens | ~393 |
@@ -37,4 +39,14 @@
 | #11210 | 7:52 PM | ✅ | Smith auto-detection reordered to prioritize Claude first in v1.3.27 default chain | ~678 |
 | #11207 | 7:51 PM | 🔵 | Prompt engineering system with strict output contracts and blueprint injection protection | ~736 |
 | #11201 | 7:50 PM | 🔵 | Proof execution system runs commands via bash -c with piped I/O and safety blocklist | ~591 |
+
+### Feb 24, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #11683 | 12:21 PM | 🔵 | Pipeline module exports run() function called from main with commission and configs | ~383 |
+| #11681 | " | 🔵 | No matches found for pipeline::run invocation across src directory | ~361 |
+| #11671 | " | 🔵 | Located main function entry point at line 27 in main.rs | ~319 |
+| #11611 | 12:12 PM | 🔵 | surveyor_prompt function not found in flux.rs with exact name match | ~306 |
+| #11610 | " | 🔵 | Surveyor prompt requests comprehensive 7-section blueprint analysis | ~530 |
 </claude-mem-context>
