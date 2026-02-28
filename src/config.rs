@@ -343,7 +343,10 @@ fn route_smith_command(base: &str, skill: &str, grade: u8, effort: Option<&str>)
         routed.push(' ');
         routed.push_str(CLAUDE_WEB_ALLOWED_TOOLS);
     }
-    if grade >= HIGH_GRADE && !routed.contains("--permission-mode") {
+    if grade >= HIGH_GRADE
+        && !routed.contains("--permission-mode")
+        && !routed.contains("--dangerously-skip-permissions")
+    {
         routed.push(' ');
         routed.push_str(CLAUDE_PLAN_MODE);
     }
@@ -645,9 +648,16 @@ mod tests {
 
     #[test]
     fn route_smith_command_adds_web_and_plan_for_claude_compat_only() {
+        // --dangerously-skip-permissions already implies bypassPermissions,
+        // so --permission-mode plan must NOT be added (they conflict).
         let claude_routed = route_smith_command(CLAUDE_SMITH_DEFAULT, "web", HIGH_GRADE, None);
         assert!(claude_routed.contains("--allowedTools"));
-        assert!(claude_routed.contains("--permission-mode plan"));
+        assert!(!claude_routed.contains("--permission-mode plan"));
+
+        // A base command without --dangerously-skip-permissions SHOULD get plan mode.
+        let plain_claude = route_smith_command("claude -p", "web", HIGH_GRADE, None);
+        assert!(plain_claude.contains("--allowedTools"));
+        assert!(plain_claude.contains("--permission-mode plan"));
 
         let codex_routed = route_smith_command(CODEX_WRAPPER, "web", HIGH_GRADE, None);
         assert_eq!(codex_routed, CODEX_WRAPPER);

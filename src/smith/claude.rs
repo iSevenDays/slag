@@ -119,10 +119,16 @@ impl ClaudeSmith {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let detail = if stderr.trim().is_empty() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                truncate_for_log(stdout.trim(), 400).to_string()
+            } else {
+                stderr.trim().to_string()
+            };
             return Err(SlagError::SmithFailed(format!(
                 "exit {}: {}",
                 output.status.code().unwrap_or(-1),
-                stderr.trim()
+                detail
             )));
         }
 

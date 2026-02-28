@@ -34,6 +34,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #11702 | 12:25 PM | 🔴 | Fixed quarried phase resumption bug and released v1.3.32 | ~458 |
 | #11679 | 12:21 PM | 🔵 | Pipeline module run function not found with relaxed visibility search | ~298 |
 | #11676 | " | 🔵 | Pipeline run function not found with "pub async fn run" signature | ~301 |
 | #11674 | " | 🔵 | Pipeline module does not expose run function with expected signature | ~285 |
