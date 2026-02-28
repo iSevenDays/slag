@@ -80,6 +80,7 @@ impl ClaudeSmith {
         let mut command = Command::new(program);
         command
             .args(args)
+            .env_remove("CLAUDECODE")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -125,10 +126,19 @@ impl ClaudeSmith {
             } else {
                 stderr.trim().to_string()
             };
+            let lower = detail.to_ascii_lowercase();
+            let hint = if lower.contains("invalid api key") || lower.contains("api key") {
+                " (try: claude auth login)"
+            } else if lower.contains("cannot be launched inside") {
+                " (slag already strips CLAUDECODE; check for wrapper scripts)"
+            } else {
+                ""
+            };
             return Err(SlagError::SmithFailed(format!(
-                "exit {}: {}",
+                "exit {}: {}{}",
                 output.status.code().unwrap_or(-1),
-                detail
+                detail,
+                hint
             )));
         }
 
