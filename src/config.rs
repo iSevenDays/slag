@@ -15,8 +15,8 @@ pub const HIGH_GRADE: u8 = 3;
 pub const MAX_ITERATE: usize = 3;
 pub const DEFAULT_PROMPT_TIMEOUT_SECS: u64 = 45;
 
-const CLAUDE_SMITH_DEFAULT: &str = "claude --dangerously-skip-permissions -p";
-const KIMI_CLAUDE_WRAPPER: &str = "kimi --dangerously-skip-permissions -p";
+const CLAUDE_SMITH_DEFAULT: &str = "claude -p --permission-mode bypassPermissions";
+const KIMI_CLAUDE_WRAPPER: &str = "kimi -p --permission-mode bypassPermissions";
 const KIMI_NATIVE_WRAPPER: &str =
     r#"sh -lc 'p=$(cat); kimi --print --prompt "$p" --output-format text'"#;
 const CODEX_WRAPPER: &str = "codex -a never exec --skip-git-repo-check --color never -";
@@ -648,8 +648,8 @@ mod tests {
 
     #[test]
     fn route_smith_command_adds_web_and_plan_for_claude_compat_only() {
-        // --dangerously-skip-permissions already implies bypassPermissions,
-        // so --permission-mode plan must NOT be added (they conflict).
+        // Default already has --permission-mode bypassPermissions,
+        // so --permission-mode plan must NOT be added (already present).
         let claude_routed = route_smith_command(CLAUDE_SMITH_DEFAULT, "web", HIGH_GRADE, None);
         assert!(claude_routed.contains("--allowedTools"));
         assert!(!claude_routed.contains("--permission-mode plan"));
