@@ -8,6 +8,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.33
+
+- **Fix: `--dangerously-skip-permissions` no longer conflicts with `--permission-mode plan`:** The surveyor and other high-grade smith invocations were appending `--permission-mode plan` even when the base command already had `--dangerously-skip-permissions` (which implies `bypassPermissions`). Claude CLI rejects conflicting permission flags with exit 1. Slag now skips adding plan mode when bypass mode is already active.
+- **Better error diagnostics:** When the smith process exits non-zero with empty stderr, slag now falls back to capturing stdout in the error message. Previously, errors reported to stdout (common in Claude CLI) were silently lost, producing unhelpful `exit 1:` messages.
+
 ## What's new in v1.3.32
 
 - **Bare `slag` resumes quarried phases:** Previously, running `slag` (no args) mid-project with PHASES.md would only forge the current phase and never advance to remaining phases. Now PHASES.md presence always loads the multi-phase pipeline, so bare `slag` picks up exactly where it left off.
