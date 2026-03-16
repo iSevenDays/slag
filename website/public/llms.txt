@@ -2,7 +2,7 @@
 
 > Smelt ideas, skim the bugs, forge the product.
 
-Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via a configured smith CLI, preferring Claude by default, with automatic retry, re-smelt recovery, and proof-based verification.
+Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via a configured smith CLI, preferring Claude by default when not shadowed by the `ANTHROPIC_API_KEY` auto-detect guardrail, with automatic retry, re-smelt recovery, and proof-based verification.
 
 ## Links
 
@@ -52,7 +52,7 @@ slag update    # Self-update
 | --no-outcome | Disable independent outcome-validation closing loop |
 
 Default output is compact for readability; use `--verbose` for full per-heat details.
-Phase-specific routing is available via `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, `SLAG_SMITH_RECOVERY`, and `SLAG_SMITH_OUTCOME` (default routed high-grade planning variant, non-interactive where supported). Users can also force the base smith with `--smith` and the fallback order with `--smith-chain`. Recovery can optionally escalate to `SLAG_SMITH_INDEPENDENT` after rejected re-smelt output. `SLAG_CONFIDENCE_THRESHOLD` (or founder/outcome-specific overrides), `SLAG_OUTCOME_TIMEOUT_SECS`, `SLAG_PROOF_TIMEOUT_SECS`, and `SLAG_SMITH_SUBAGENT`/`SLAG_SUBAGENT_TIMEOUT_SECS` bound and recover low-confidence cases.
+Phase-specific routing is available via `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, `SLAG_SMITH_RECOVERY`, and `SLAG_SMITH_OUTCOME` (default routed high-grade planning variant, non-interactive where supported). Users can also force the base smith with `--smith` and the fallback order with `--smith-chain`. If `ANTHROPIC_API_KEY` is present, auto-detection skips Claude while other supported smiths are available, but explicit `--smith claude` still overrides that policy. Recovery can optionally escalate to `SLAG_SMITH_INDEPENDENT` after rejected re-smelt output. `SLAG_CONFIDENCE_THRESHOLD` (or founder/outcome-specific overrides), `SLAG_OUTCOME_TIMEOUT_SECS`, `SLAG_PROOF_TIMEOUT_SECS`, and `SLAG_SMITH_SUBAGENT`/`SLAG_SUBAGENT_TIMEOUT_SECS` bound and recover low-confidence cases.
 
 ## Pipeline
 

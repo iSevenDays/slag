@@ -202,10 +202,11 @@ fn auto_detect_smith_chain() -> Vec<String> {
         .as_deref()
         .map(is_claude_compatible_kimi_cli)
         .unwrap_or(false);
-    choose_detected_smith_chain(
+    choose_detected_smith_chain_with_policy(
         |cmd| resolve_command_path(cmd).is_some(),
         kimi_native,
         kimi_claude_compat,
+        avoid_claude_autodetect_when_api_key_present(),
     )
 }
 
@@ -261,22 +262,35 @@ fn choose_detected_smith<F>(
 where
     F: FnMut(&str) -> bool,
 {
-    choose_detected_smith_chain(has_cmd, kimi_native, kimi_claude_compat)
+    choose_detected_smith_chain_with_policy(has_cmd, kimi_native, kimi_claude_compat, false)
         .into_iter()
         .next()
 }
 
 fn choose_detected_smith_chain<F>(
-    mut has_cmd: F,
+    has_cmd: F,
     kimi_native: bool,
     kimi_claude_compat: bool,
 ) -> Vec<String>
 where
     F: FnMut(&str) -> bool,
 {
+    choose_detected_smith_chain_with_policy(has_cmd, kimi_native, kimi_claude_compat, false)
+}
+
+fn choose_detected_smith_chain_with_policy<F>(
+    mut has_cmd: F,
+    kimi_native: bool,
+    kimi_claude_compat: bool,
+    avoid_claude_autodetect: bool,
+) -> Vec<String>
+where
+    F: FnMut(&str) -> bool,
+{
     let mut chain = Vec::new();
     let has_kimi = has_cmd("kimi");
-    if has_cmd("claude") {
+    let has_claude = has_cmd("claude");
+    if has_claude && !avoid_claude_autodetect {
         chain.push(CLAUDE_SMITH_DEFAULT.to_string());
     }
     if has_cmd("codex") {
@@ -299,7 +313,14 @@ where
         };
         chain.push(cmd.to_string());
     }
+    if has_claude && chain.is_empty() {
+        chain.push(CLAUDE_SMITH_DEFAULT.to_string());
+    }
     dedup_preserve_order(chain)
+}
+
+fn avoid_claude_autodetect_when_api_key_present() -> bool {
+    std::env::var_os("ANTHROPIC_API_KEY").is_some()
 }
 
 fn smith_chain_from_override_or_detected(
@@ -665,6 +686,27 @@ mod tests {
                 KIMI_CLAUDE_WRAPPER.to_string()
             ]
         );
+    }
+
+    #[test]
+    fn detected_smith_autodetect_skips_claude_when_api_key_present() {
+        let chain = choose_detected_smith_chain_with_policy(
+            |cmd| matches!(cmd, "claude" | "codex" | "gemini"),
+            false,
+            false,
+            true,
+        );
+        assert_eq!(
+            chain,
+            vec![CODEX_WRAPPER.to_string(), GEMINI_WRAPPER.to_string()]
+        );
+    }
+
+    #[test]
+    fn detected_smith_autodetect_keeps_claude_when_only_option() {
+        let chain =
+            choose_detected_smith_chain_with_policy(|cmd| cmd == "claude", false, false, true);
+        assert_eq!(chain, vec![CLAUDE_SMITH_DEFAULT.to_string()]);
     }
 
     #[test]

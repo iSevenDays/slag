@@ -8,6 +8,12 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.37
+
+- **Claude auto-detect guardrail:** if `ANTHROPIC_API_KEY` is present, auto-detection skips Claude while other supported smith CLIs are available, avoiding accidental API-key billing.
+- **Claude subscription fallback:** if Claude is selected and fails with an API-key or billing-style error, slag now checks for subscription auth and retries once without `ANTHROPIC_API_KEY` when available.
+- **Runtime detection tested locally:** end-to-end shim-based tests now confirm the actual selected smith matches the intended policy, not just the unit-level chain ordering.
+
 ## What's new in v1.3.36
 
 - **Explicit smith selection:** `slag` now supports `--smith` and `--smith-chain`, so users can pick an agent without exporting env vars.
@@ -155,10 +161,12 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 
 When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
 `claude`, `codex`, `gemini`, `opencode`, `kimi` (Claude-compatible), then native `kimi` as last fallback.
+If `ANTHROPIC_API_KEY` is present, auto-detection skips Claude while other supported smiths are available, to avoid accidental API-key billing. Explicit `--smith claude` or `SLAG_SMITH=claude` still overrides that policy.
 
 Common selectors for `--smith` and `SLAG_SMITH`: `claude`, `claude-plan`, `codex`, `gemini`, `opencode`, `kimi`, `kimi-plan`.
 
 Forge now uses a runtime failover chain: if the active smith hard-fails protocol/invocation for an ingot, slag retries that ingot on the next smith in `SLAG_SMITH_CHAIN` automatically.
+For Claude CLI specifically, slag keeps the current auth mode first, but if `ANTHROPIC_API_KEY` is set and the run fails with an API-key or billing-style error, it checks whether Claude subscription auth is already available and retries once with `ANTHROPIC_API_KEY` removed.
 
 ## Progress display
 

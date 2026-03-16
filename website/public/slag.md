@@ -4,6 +4,12 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
+## What's new in v1.3.37
+
+- Claude auto-detect guardrail: if `ANTHROPIC_API_KEY` is present, auto-detection skips Claude while other supported smith CLIs are available, avoiding accidental API-key billing.
+- Claude subscription fallback: if Claude is selected and fails with an API-key or billing-style error, slag checks for subscription auth and retries once without `ANTHROPIC_API_KEY` when available.
+- Runtime detection tested locally: end-to-end shim-based tests confirm the actual selected smith matches the intended policy.
+
 ## What's new in v1.3.36
 
 - Explicit smith selection: `slag` now supports `--smith` and `--smith-chain`.
@@ -119,6 +125,7 @@ For uncertain web outcomes, slag can force deterministic validation via `scripts
 Founder/outcome confidence is scored; thresholds come from `SLAG_CONFIDENCE_THRESHOLD` or phase overrides (`SLAG_FOUNDER_CONFIDENCE_THRESHOLD`, `SLAG_OUTCOME_CONFIDENCE_THRESHOLD`).
 Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `claude`, then `codex`, `gemini`, `opencode`, Claude-compatible `kimi`, with native `kimi` fallback; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
 Forge smith failures can fail over at runtime via `SLAG_SMITH_CHAIN` (comma-separated aliases/commands). On protocol/invocation hard-failure, slag retries the ingot on the next smith in that chain.
+For Claude CLI specifically, slag keeps the current auth mode first, but if `ANTHROPIC_API_KEY` is set and the run fails with an API-key or billing-style error, it checks whether Claude subscription auth is already available and retries once with `ANTHROPIC_API_KEY` removed.
 Set `--log-format json` (or `SLAG_LOG_FORMAT=json`) to emit structured event logs while still writing run-scoped traces under `logs/runs/<run_id>/events.jsonl`.
 
 ### 5. ASSAY
@@ -161,6 +168,7 @@ The Rust binary is faster, has better error handling, and includes self-update. 
 
 ### Do I need Claude CLI installed?
 Not for the Rust binary. It auto-detects the first compatible smith CLI (`claude`, then `codex`, `gemini`, `opencode`, Claude-compatible `kimi`, with native `kimi` as fallback) unless you set `SLAG_SMITH` explicitly. You can also force a specific selector with `--smith claude`, `--smith claude-plan`, `--smith codex`, and similar aliases. The legacy bash script still expects Claude CLI.
+If `ANTHROPIC_API_KEY` is present, auto-detection skips Claude while other supported smiths are available, to avoid accidental API-key billing. Explicit `--smith claude` or `SLAG_SMITH=claude` still overrides that policy.
 
 ## Ingot S-Expression Format
 

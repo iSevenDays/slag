@@ -1,8 +1,10 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::process::Output;
 use std::time::Duration;
 
+use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -15,6 +17,7 @@ use crate::events;
 const DEFAULT_PROMPT_REPEAT_COUNT: usize = 2;
 const DEFAULT_PROMPT_REPEAT_MAX_CHARS: usize = 40_000;
 const DEFAULT_SMITH_TIMEOUT_SECS: u64 = 300;
+const CLAUDE_AUTH_STATUS_TIMEOUT_SECS: u64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptRepeatMode {
@@ -41,6 +44,11 @@ impl PromptRepeatMode {
 /// Subprocess-backed smith adapter used for Claude-compatible and stdin-driven CLIs.
 pub struct ClaudeSmith {
     command: String,
+}
+
+struct SmithSubprocessResult {
+    output: Output,
+    stdin_error: Option<String>,
 }
 
 impl ClaudeSmith {
@@ -77,73 +85,249 @@ impl ClaudeSmith {
         let program = parts[0];
         let args = &parts[1..];
 
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .env_remove("CLAUDECODE")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        if let Some(dir) = cwd {
-            command.current_dir(dir);
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|e| SlagError::SmithFailed(format!("failed to spawn {program}: {e}")))?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(repeated_prompt.as_bytes())
-                .await
-                .map_err(|e| SlagError::SmithFailed(format!("stdin write failed: {e}")))?;
-        }
-
         let output =
-            match timeout(Duration::from_secs(timeout_secs), child.wait_with_output()).await {
-                Ok(Ok(output)) => output,
-                Ok(Err(e)) => return Err(SlagError::SmithFailed(format!("wait failed: {e}"))),
-                Err(_) => {
-                    events::emit_warn(
-                        "smith.invoke.timeout",
-                        "smith invocation timed out",
-                        serde_json::json!({
-                            "timeout_secs": timeout_secs,
-                            "command": truncate_for_log(&self.command, 160),
-                        }),
-                    );
+            run_smith_subprocess(program, args, &repeated_prompt, cwd, timeout_secs, false).await?;
+
+        if output.output.status.success() {
+            if let Some(stdin_error) = &output.stdin_error {
+                return Err(SlagError::SmithFailed(format!(
+                    "stdin write failed before smith completed: {stdin_error}"
+                )));
+            }
+            return Ok(String::from_utf8_lossy(&output.output.stdout).to_string());
+        }
+
+        let detail = smith_failure_detail(&output);
+        if should_retry_with_claude_subscription(program, &self.command, &detail)
+            && claude_subscription_auth_available(program, cwd).await
+        {
+            events::emit_warn(
+                "smith.invoke.claude.subscription_fallback",
+                "retrying Claude invocation without ANTHROPIC_API_KEY after API-key failure",
+                serde_json::json!({
+                    "command": truncate_for_log(&self.command, 160),
+                    "reason": truncate_for_log(&detail, 200),
+                }),
+            );
+
+            let retry_output =
+                run_smith_subprocess(program, args, &repeated_prompt, cwd, timeout_secs, true)
+                    .await?;
+            if retry_output.output.status.success() {
+                if let Some(stdin_error) = &retry_output.stdin_error {
                     return Err(SlagError::SmithFailed(format!(
-                        "timeout after {timeout_secs}s"
+                        "Claude subscription fallback succeeded but stdin write failed: {stdin_error}"
                     )));
                 }
-            };
+                events::emit_info(
+                    "smith.invoke.claude.subscription_fallback.success",
+                    "Claude invocation succeeded after removing ANTHROPIC_API_KEY",
+                    serde_json::json!({
+                        "command": truncate_for_log(&self.command, 160),
+                    }),
+                );
+                return Ok(String::from_utf8_lossy(&retry_output.output.stdout).to_string());
+            }
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let detail = if stderr.trim().is_empty() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                truncate_for_log(stdout.trim(), 400).to_string()
-            } else {
-                stderr.trim().to_string()
-            };
-            let lower = detail.to_ascii_lowercase();
-            let hint = if lower.contains("invalid api key") || lower.contains("api key") {
-                " (try: claude auth login)"
-            } else if lower.contains("cannot be launched inside") {
-                " (slag already strips CLAUDECODE; check for wrapper scripts)"
-            } else {
-                ""
-            };
+            let retry_detail = smith_failure_detail(&retry_output);
+            let retry_hint = smith_failure_hint(&retry_detail);
             return Err(SlagError::SmithFailed(format!(
-                "exit {}: {}{}",
-                output.status.code().unwrap_or(-1),
+                "exit {}: {} (subscription fallback removed ANTHROPIC_API_KEY, but retry exit {}: {}{})",
+                output.output.status.code().unwrap_or(-1),
                 detail,
-                hint
+                retry_output.output.status.code().unwrap_or(-1),
+                retry_detail,
+                retry_hint
             )));
         }
 
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        Err(SlagError::SmithFailed(format!(
+            "exit {}: {}{}",
+            output.output.status.code().unwrap_or(-1),
+            detail,
+            smith_failure_hint(&detail)
+        )))
     }
+}
+
+async fn run_smith_subprocess(
+    program: &str,
+    args: &[&str],
+    prompt: &str,
+    cwd: Option<&Path>,
+    timeout_secs: u64,
+    remove_anthropic_api_key: bool,
+) -> Result<SmithSubprocessResult, SlagError> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env_remove("CLAUDECODE")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    if remove_anthropic_api_key {
+        command.env_remove("ANTHROPIC_API_KEY");
+    }
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| SlagError::SmithFailed(format!("failed to spawn {program}: {e}")))?;
+
+    let stdin_error = if let Some(mut stdin) = child.stdin.take() {
+        match stdin.write_all(prompt.as_bytes()).await {
+            Ok(()) => None,
+            Err(e) => Some(e.to_string()),
+        }
+    } else {
+        None
+    };
+
+    match timeout(Duration::from_secs(timeout_secs), child.wait_with_output()).await {
+        Ok(Ok(output)) => Ok(SmithSubprocessResult {
+            output,
+            stdin_error,
+        }),
+        Ok(Err(e)) => Err(SlagError::SmithFailed(format!("wait failed: {e}"))),
+        Err(_) => {
+            events::emit_warn(
+                "smith.invoke.timeout",
+                "smith invocation timed out",
+                serde_json::json!({
+                    "timeout_secs": timeout_secs,
+                    "command": truncate_for_log(program, 160),
+                    "anthropic_api_key_removed": remove_anthropic_api_key,
+                }),
+            );
+            Err(SlagError::SmithFailed(format!(
+                "timeout after {timeout_secs}s"
+            )))
+        }
+    }
+}
+
+fn smith_failure_detail(result: &SmithSubprocessResult) -> String {
+    let stderr = String::from_utf8_lossy(&result.output.stderr);
+    let detail = if stderr.trim().is_empty() {
+        let stdout = String::from_utf8_lossy(&result.output.stdout);
+        truncate_for_log(stdout.trim(), 400).to_string()
+    } else {
+        stderr.trim().to_string()
+    };
+
+    if let Some(stdin_error) = &result.stdin_error {
+        if detail.is_empty() {
+            format!("stdin write failed: {stdin_error}")
+        } else {
+            format!("{detail} (stdin write failed: {stdin_error})")
+        }
+    } else {
+        detail
+    }
+}
+
+fn smith_failure_hint(detail: &str) -> &'static str {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("invalid api key") || lower.contains("api key") {
+        " (try: claude auth login)"
+    } else if lower.contains("cannot be launched inside") {
+        " (slag already strips CLAUDECODE; check for wrapper scripts)"
+    } else {
+        ""
+    }
+}
+
+fn should_retry_with_claude_subscription(program: &str, command: &str, detail: &str) -> bool {
+    anthropic_api_key_present()
+        && looks_like_claude_command(program, command)
+        && is_api_key_auth_failure(detail)
+}
+
+fn anthropic_api_key_present() -> bool {
+    std::env::var_os("ANTHROPIC_API_KEY").is_some()
+}
+
+fn looks_like_claude_command(program: &str, command: &str) -> bool {
+    let program_lower = program.to_ascii_lowercase();
+    let command_lower = command.to_ascii_lowercase();
+    program_lower.contains("claude")
+        || (command_lower.contains("claude") && !command_lower.contains("codex"))
+}
+
+fn is_api_key_auth_failure(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    lower.contains("invalid api key")
+        || lower.contains("api key")
+        || lower.contains("anthropic_api_key")
+        || lower.contains("credit balance")
+        || lower.contains("insufficient credits")
+        || lower.contains("billing")
+}
+
+async fn claude_subscription_auth_available(program: &str, cwd: Option<&Path>) -> bool {
+    let mut command = Command::new(program);
+    command
+        .arg("auth")
+        .arg("status")
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+
+    let output = match timeout(
+        Duration::from_secs(CLAUDE_AUTH_STATUS_TIMEOUT_SECS),
+        command.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        _ => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    if !output.stderr.is_empty() {
+        text.push('\n');
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    auth_status_indicates_subscription(&text)
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaudeAuthStatus {
+    #[serde(rename = "loggedIn")]
+    logged_in: Option<bool>,
+    #[serde(rename = "authMethod")]
+    auth_method: Option<String>,
+}
+
+fn auth_status_indicates_subscription(raw: &str) -> bool {
+    if let Ok(status) = serde_json::from_str::<ClaudeAuthStatus>(raw.trim()) {
+        if status.logged_in == Some(true) {
+            return status
+                .auth_method
+                .as_deref()
+                .map(|method| !method.eq_ignore_ascii_case("api_key"))
+                .unwrap_or(true);
+        }
+        return false;
+    }
+
+    let compact = raw
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    compact.contains("\"loggedin\":true") && !compact.contains("api_key")
 }
 
 fn smith_timeout_secs() -> u64 {
@@ -328,6 +512,7 @@ fn shell_words(s: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     #[test]
     fn shell_words_basic() {
@@ -372,5 +557,85 @@ mod tests {
             PromptRepeatMode::NonPlan,
             "claude -p --dangerously-skip-permissions"
         ));
+    }
+
+    #[test]
+    fn auth_status_subscription_true_for_non_api_login() {
+        let raw = r#"{"loggedIn":true,"authMethod":"oauth"}"#;
+        assert!(auth_status_indicates_subscription(raw));
+    }
+
+    #[test]
+    fn auth_status_subscription_false_for_api_key_login() {
+        let raw = r#"{"loggedIn":true,"authMethod":"api_key"}"#;
+        assert!(!auth_status_indicates_subscription(raw));
+    }
+
+    #[test]
+    fn api_key_failure_detector_matches_auth_and_billing_terms() {
+        assert!(is_api_key_auth_failure("Invalid API key provided"));
+        assert!(is_api_key_auth_failure("credit balance is too low"));
+        assert!(!is_api_key_auth_failure(
+            "Cannot read properties of undefined"
+        ));
+    }
+
+    #[test]
+    fn claude_subscription_retry_requires_api_key_and_claude_command() {
+        let prior = std::env::var_os("ANTHROPIC_API_KEY");
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        let eligible = should_retry_with_claude_subscription(
+            "claude",
+            "claude -p --permission-mode bypassPermissions",
+            "invalid api key",
+        );
+        if let Some(value) = prior {
+            std::env::set_var("ANTHROPIC_API_KEY", value);
+        } else {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+        assert!(eligible);
+    }
+
+    #[test]
+    fn claude_subscription_retry_ignores_non_claude_commands() {
+        let prior = std::env::var_os("ANTHROPIC_API_KEY");
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        let eligible = should_retry_with_claude_subscription(
+            "codex",
+            "codex -a never exec -",
+            "invalid api key",
+        );
+        restore_env_var("ANTHROPIC_API_KEY", prior);
+        assert!(!eligible);
+    }
+
+    #[tokio::test]
+    async fn subprocess_captures_auth_error_even_if_stdin_closes_early() {
+        let result = run_smith_subprocess(
+            "sh",
+            &[
+                "-lc",
+                "exec 0<&-; sleep 0.05; echo 'Invalid API key provided' >&2; exit 1",
+            ],
+            &"x".repeat(1_000_000),
+            None,
+            5,
+            false,
+        )
+        .await
+        .expect("subprocess should return collected output");
+
+        assert!(!result.output.status.success());
+        assert!(result.stdin_error.is_some());
+        assert!(smith_failure_detail(&result).contains("Invalid API key provided"));
+    }
+
+    fn restore_env_var(name: &str, value: Option<OsString>) {
+        if let Some(value) = value {
+            std::env::set_var(name, value);
+        } else {
+            std::env::remove_var(name);
+        }
     }
 }
