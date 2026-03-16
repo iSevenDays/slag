@@ -49,6 +49,7 @@ async fn main() {
         .unwrap_or_else(LogFormat::from_env);
 
     let _ = events::init(log_format, cli.verbose);
+    let smith_overrides = cli.smith_overrides();
 
     let pipeline_config = PipelineConfig::new(
         cli.worktree,
@@ -70,11 +71,11 @@ async fn main() {
         Some(Command::Status) => show_status(),
         Some(Command::Update) => update::self_update().await,
         Some(Command::Resume) => {
-            let smith_config = SmithConfig::from_env();
+            let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
             pipeline::run(None, &smith_config, &pipeline_config).await
         }
         None => {
-            let smith_config = SmithConfig::from_env();
+            let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
             let commission = cli.commission_text();
             pipeline::run(commission.as_deref(), &smith_config, &pipeline_config).await
         }

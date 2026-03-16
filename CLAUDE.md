@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**slag** is a task orchestrator for AI-powered development using metallurgical metaphors. It breaks requirements into S-expression "ingots" and forges them via Claude with automatic retry and proof-based verification.
+**slag** is a task orchestrator for AI-powered development using metallurgical metaphors. It breaks requirements into S-expression "ingots" and forges them via a configured smith CLI, with Claude-first auto-detection, automatic retry, and proof-based verification.
 
 Two implementations:
 1. **Rust binary** (`src/`) — Primary, async with tokio, parallel anvils via JoinSet
@@ -36,7 +36,7 @@ src/
   config.rs            Constants, paths, SmithConfig
   crucible.rs          PLAN.md file operations (load, save, replace, counts)
   error.rs             SlagError enum (thiserror)
-  flux.rs              Claude CLI invocation, output capture
+  flux.rs              Smith CLI invocation helpers, output capture
   proof.rs             Shell command verification (exit code checks)
   progress.rs          PROGRESS.md append, codebase pattern tracking
   tui.rs               Terminal UI (indicatif, crossterm colors)
@@ -47,7 +47,7 @@ src/
     writer.rs          S-expression serializer
   smith/
     mod.rs             Smith trait (async forge interface)
-    claude.rs          ClaudeSmith — real Claude CLI integration
+    claude.rs          ClaudeSmith — subprocess-backed smith integration
     mock.rs            MockSmith — deterministic test responses
   pipeline/
     mod.rs             Pipeline orchestrator

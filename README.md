@@ -8,6 +8,12 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.36
+
+- **Explicit smith selection:** `slag` now supports `--smith` and `--smith-chain`, so users can pick an agent without exporting env vars.
+- **Claude-first preference restored:** auto-detection now prefers `claude`, then `codex`, then `gemini`, then the remaining supported smith CLIs.
+- **`claude-plan` / `kimi-plan` selectors:** high-grade routing for the built-in Claude-compatible wrappers now resolves cleanly to plan mode.
+
 ## What's new in v1.3.33
 
 - **Fix: `--dangerously-skip-permissions` no longer conflicts with `--permission-mode plan`:** The surveyor and other high-grade smith invocations were appending `--permission-mode plan` even when the base command already had `--dangerously-skip-permissions` (which implies `bypassPermissions`). Claude CLI rejects conflicting permission flags with exit 1. Slag now skips adding plan mode when bypass mode is already active.
@@ -38,7 +44,7 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ## What's new in v1.3.27
 
-- **Claude is now the default smith:** auto-detection priority reordered to `claude` first, so slag works out of the box without alternative CLIs.
+- **Claude became the default smith in v1.3.27:** auto-detection priority was reordered to `claude` first in that release.
 - **Usage-limit failover:** when any smith hits a usage or rate limit, slag automatically fails over to the next smith in the chain instead of crashing.
 
 ## What's new in v1.3.26
@@ -116,20 +122,22 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `--prompt-timeout-secs N` | 45 | Prompt timeout before default action |
 | `--log-format FORMAT` | `text` | Output renderer format: `text` or `json` |
 | `--effort LEVEL` | unset | Smith effort level: `low`, `medium`, `high` (controls extended thinking) |
+| `--smith VALUE` | unset | Base smith selector or full command, e.g. `claude`, `claude-plan`, `codex` |
+| `--smith-chain VALUE` | unset | Comma-separated fallback smith selectors or full commands |
 
 **Model routing (env):**
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SLAG_SMITH` | auto-detected (`claude` / `kimi` Claude-compatible / `codex` / `gemini` / `opencode`; native `kimi` fallback) | Main smith for survey/founder/forge |
+| `SLAG_SMITH` | auto-detected (`claude` / `codex` / `gemini` / `opencode` / `kimi`; native `kimi` fallback) | Main smith for survey/founder/forge |
 | `SLAG_SMITH_CHAIN` | auto-generated from detected smiths | Comma-separated fallback chain for forge smith failover (aliases: `kimi`, `codex`, `gemini`, `opencode`, `claude`) |
-| `SLAG_SMITH_SURVEYOR` | `SLAG_SMITH --permission-mode plan` | Override model/flags for Surveyor phase |
+| `SLAG_SMITH_SURVEYOR` | routed high-grade planning variant of `SLAG_SMITH` | Override model/flags for Surveyor phase |
 | `SLAG_SMITH_FOUNDER` | `SLAG_SMITH` | Override model/flags for Founder phase |
 | `SLAG_SMITH_REVIEW` | `SLAG_SMITH` | Override model/flags for Review phase |
 | `SLAG_SMITH_RECOVERY` | `SLAG_SMITH` | Override model/flags for analysis/re-smelt/reconsider phases |
-| `SLAG_SMITH_OUTCOME` | `SLAG_SMITH --permission-mode plan` | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
+| `SLAG_SMITH_OUTCOME` | same routed planning variant used by Surveyor | Independent outcome validator (non-interactive by default; override to use a specific model/profile) |
 | `SLAG_SMITH_INDEPENDENT` | unset (disabled) | Optional independent fallback smith for recovery escalation after rejected re-smelt/reconsider output |
-| `SLAG_SMITH_SUBAGENT` | auto-detected (`claude` / `kimi` Claude-compatible / `codex` / `gemini` / `opencode`; native `kimi` fallback) | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
+| `SLAG_SMITH_SUBAGENT` | auto-detected (`claude` / `codex` / `gemini` / `opencode` / `kimi`; native `kimi` fallback) | Optional uncertainty fallback smith (used only on low-confidence founder/outcome cases) |
 | `SLAG_CONFIDENCE_THRESHOLD` | `0.65` | Global default threshold for uncertainty escalation |
 | `SLAG_FOUNDER_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Founder-specific escalation threshold |
 | `SLAG_OUTCOME_CONFIDENCE_THRESHOLD` | inherits `SLAG_CONFIDENCE_THRESHOLD` | Outcome-specific escalation threshold |
@@ -146,7 +154,9 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_PROMPT_REPEAT_MAX_CHARS` | `40000` | Full repetition up to this size; partial tail repetition above |
 
 When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
-`claude`, `kimi` (Claude-compatible), `codex`, `gemini`, `opencode`, then native `kimi` as last fallback.
+`claude`, `codex`, `gemini`, `opencode`, `kimi` (Claude-compatible), then native `kimi` as last fallback.
+
+Common selectors for `--smith` and `SLAG_SMITH`: `claude`, `claude-plan`, `codex`, `gemini`, `opencode`, `kimi`, `kimi-plan`.
 
 Forge now uses a runtime failover chain: if the active smith hard-fails protocol/invocation for an ingot, slag retries that ingot on the next smith in `SLAG_SMITH_CHAIN` automatically.
 

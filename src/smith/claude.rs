@@ -38,7 +38,7 @@ impl PromptRepeatMode {
     }
 }
 
-/// Claude CLI smith that spawns `claude -p` as a subprocess.
+/// Subprocess-backed smith adapter used for Claude-compatible and stdin-driven CLIs.
 pub struct ClaudeSmith {
     command: String,
 }

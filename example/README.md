@@ -12,7 +12,7 @@ slag ran its 4-phase pipeline:
 
 1. **SURVEYOR** read `PRD.md` and produced `BLUEPRINT.md`
 2. **FOUNDER** designed ingots and wrote them to `PLAN.md`
-3. **FORGE** executed each ingot via Claude, ran proofs, retried failures
+3. **FORGE** executed each ingot via the configured smith CLI (Claude in this captured run), ran proofs, retried failures
 4. **ASSAY** wrote the final report to `PROGRESS.md`
 
 ## Files

@@ -4,11 +4,11 @@
 
 Task orchestrator for AI-powered development. Breaks requirements into S-expression ingots and forges them via configurable smith CLIs with automatic retry, re-smelt recovery, and proof-based verification.
 
-## What's new in v1.3.24
+## What's new in v1.3.36
 
-- Release sync: README + website release notes and version metadata updated together.
-- Deploy refresh: published a fresh Pages production deployment for the latest release.
-- No runtime behavior changes in this patch.
+- Explicit smith selection: `slag` now supports `--smith` and `--smith-chain`.
+- Claude-first preference restored: auto-detection now prefers `claude`, then `codex`, then `gemini`, then the remaining supported smith CLIs.
+- `claude-plan` and `kimi-plan` selectors route the built-in Claude-compatible wrappers cleanly to plan mode for high-grade work.
 
 ## Install
 
@@ -111,13 +111,13 @@ Prompt repetition (arXiv:2512.14982) is now used in smith invocations by default
 
 ### 4. OUTCOME
 Independent tester/commenter pass validates user-visible behavior. If outcome fails, slag appends repair ingots and re-enters forge automatically. Disable with `--no-outcome`.
-Set `SLAG_SMITH_OUTCOME` to run this validator on a specific model profile if desired (default is non-interactive plan mode). Other phases can be routed independently with `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, and `SLAG_SMITH_RECOVERY`.
+Set `SLAG_SMITH_OUTCOME` to run this validator on a specific model profile if desired (default is the routed high-grade planning variant of the base smith, non-interactive where supported). Other phases can be routed independently with `SLAG_SMITH_SURVEYOR`, `SLAG_SMITH_FOUNDER`, `SLAG_SMITH_REVIEW`, and `SLAG_SMITH_RECOVERY`.
 Validator/recast calls are timeout-bounded via `SLAG_OUTCOME_TIMEOUT_SECS` (default 180). Proof/test commands are timeout-bounded via `SLAG_PROOF_TIMEOUT_SECS` (default 120).
 If validator output is malformed (for example prose without `TEST:`), slag recasts validation and falls back to inferred/runtime proofs so the loop continues.
 For web/simulation outcomes, outcome TEST commands must be headless and emit a screenshot to `$SLAG_OUTCOME_SCREENSHOT` (default `logs/outcome-smoke.png`).
 For uncertain web outcomes, slag can force deterministic validation via `scripts/outcome_web_smoke.js` (page loads, runtime metric > 0, zero console errors, screenshot artifact).
 Founder/outcome confidence is scored; thresholds come from `SLAG_CONFIDENCE_THRESHOLD` or phase overrides (`SLAG_FOUNDER_CONFIDENCE_THRESHOLD`, `SLAG_OUTCOME_CONFIDENCE_THRESHOLD`).
-Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `kimi` Claude-compatible, then `codex`, `gemini`, `opencode`, `claude`, with native `kimi` fallback; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
+Low-confidence founder/outcome cases can escalate once via `SLAG_SMITH_SUBAGENT` (default auto-detect: `claude`, then `codex`, `gemini`, `opencode`, Claude-compatible `kimi`, with native `kimi` fallback; timeout `SLAG_SUBAGENT_TIMEOUT_SECS`).
 Forge smith failures can fail over at runtime via `SLAG_SMITH_CHAIN` (comma-separated aliases/commands). On protocol/invocation hard-failure, slag retries the ingot on the next smith in that chain.
 Set `--log-format json` (or `SLAG_LOG_FORMAT=json`) to emit structured event logs while still writing run-scoped traces under `logs/runs/<run_id>/events.jsonl`.
 
@@ -160,7 +160,7 @@ Run `slag update` to self-update to the latest release. This downloads the new b
 The Rust binary is faster, has better error handling, and includes self-update. The bash script is a single file with no build step — useful if you can't install Rust or want to inspect/modify the orchestrator directly.
 
 ### Do I need Claude CLI installed?
-Not for the Rust binary. It auto-detects the first compatible smith CLI (`kimi` Claude-compatible, then `codex`, `gemini`, `opencode`, `claude`, with native `kimi` as fallback) unless you set `SLAG_SMITH` explicitly. The legacy bash script still expects Claude CLI.
+Not for the Rust binary. It auto-detects the first compatible smith CLI (`claude`, then `codex`, `gemini`, `opencode`, Claude-compatible `kimi`, with native `kimi` as fallback) unless you set `SLAG_SMITH` explicitly. You can also force a specific selector with `--smith claude`, `--smith claude-plan`, `--smith codex`, and similar aliases. The legacy bash script still expects Claude CLI.
 
 ## Ingot S-Expression Format
 

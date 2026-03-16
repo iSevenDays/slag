@@ -332,7 +332,7 @@ EOF</code>
 
         <details box="square">
           <summary>Do I need Claude CLI installed?</summary>
-          <p>Not for the Rust binary. It auto-detects the first compatible smith CLI (<code>kimi</code> Claude-compatible, then <code>codex</code>, <code>gemini</code>, <code>opencode</code>, <code>claude</code>, with native <code>kimi</code> as fallback) unless you set <code>SLAG_SMITH</code> explicitly. The legacy bash script still expects Claude CLI.</p>
+          <p>Not for the Rust binary. It auto-detects the first compatible smith CLI (<code>claude</code>, then <code>codex</code>, <code>gemini</code>, <code>opencode</code>, Claude-compatible <code>kimi</code>, with native <code>kimi</code> as fallback) unless you set <code>SLAG_SMITH</code> explicitly. You can also force a specific selector with <code>--smith claude</code>, <code>--smith claude-plan</code>, <code>--smith codex</code>, and similar aliases. The legacy bash script still expects Claude CLI.</p>
         </details>
       </section>
 

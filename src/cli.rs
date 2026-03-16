@@ -1,4 +1,4 @@
-use crate::config::{LogFormat, PromptPolicy};
+use crate::config::{LogFormat, PromptPolicy, SmithOverrides};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -71,6 +71,14 @@ pub struct Cli {
     /// Smith effort level (low, medium, high) — controls extended thinking budget
     #[arg(long)]
     pub effort: Option<String>,
+
+    /// Smith to use (alias or full command, e.g. claude, claude-plan, codex)
+    #[arg(long)]
+    pub smith: Option<String>,
+
+    /// Fallback smith chain (comma-separated aliases or full commands)
+    #[arg(long)]
+    pub smith_chain: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -125,6 +133,13 @@ impl Cli {
             None
         } else {
             Some(self.commission.join(" "))
+        }
+    }
+
+    pub fn smith_overrides(&self) -> SmithOverrides {
+        SmithOverrides {
+            base: self.smith.clone(),
+            chain: self.smith_chain.clone(),
         }
     }
 }
