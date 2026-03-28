@@ -820,6 +820,14 @@ async fn strike_ingot(
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(1);
 
+    // Per-ingot time budget: ingot field → env var → default (0 = disabled)
+    let heat_budget_secs = ingot.budget.or_else(|| {
+        std::env::var("SLAG_INGOT_BUDGET_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v > 0)
+    });
+
     for heat in 1..=ingot.max {
         let heat_start = Instant::now();
 
@@ -883,10 +891,22 @@ async fn strike_ingot(
         };
 
         // In worktree mode, invoke smith in the worktree directory
-        let response = if let Some(ref wt_path) = worktree_path {
-            invoke_smith_in_worktree(smith, &flux_text, wt_path).await
+        let smith_fut = async {
+            if let Some(ref wt_path) = worktree_path {
+                invoke_smith_in_worktree(smith, &flux_text, wt_path).await
+            } else {
+                smith.invoke(&flux_text).await
+            }
+        };
+        let response = if let Some(budget) = heat_budget_secs {
+            match tokio::time::timeout(Duration::from_secs(budget), smith_fut).await {
+                Ok(result) => result,
+                Err(_) => Err(SlagError::SmithFailed(format!(
+                    "budget exceeded: smith invocation timed out after {budget}s"
+                ))),
+            }
         } else {
-            smith.invoke(&flux_text).await
+            smith_fut.await
         };
 
         let response = match response {
