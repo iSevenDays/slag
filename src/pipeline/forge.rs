@@ -828,7 +828,15 @@ async fn strike_ingot(
             .filter(|v| *v > 0)
     });
 
-    for heat in 1..=ingot.max {
+    let mut heat: u8 = 0;
+    let mut infra_retries: u8 = 0;
+    const MAX_INFRA_RETRIES: u8 = 6; // cap free retries for infra failures
+
+    loop {
+        heat = heat.saturating_add(1);
+        if heat > ingot.max {
+            break;
+        }
         let heat_start = Instant::now();
 
         // Check for identical consecutive failures from previous heat
@@ -921,6 +929,7 @@ async fn strike_ingot(
                     spinner.finish_and_clear();
                 }
                 smith_invoke_fail_count = smith_invoke_fail_count.saturating_add(1);
+                infra_retries = infra_retries.saturating_add(1);
                 ledger::append_record(&ExperimentRecord {
                     ts: chrono::Utc::now().to_rfc3339(),
                     ingot_id: active_ingot.id.clone(),
@@ -940,8 +949,13 @@ async fn strike_ingot(
                     if output_mode.is_verbose() {
                         println!("\x1b[31m✗\x1b[0m");
                     } else {
-                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
+                        println!("    \x1b[31m↺\x1b[0m infra retry (heat {heat}/{} not consumed)", heat_max);
                     }
+                }
+                // Infrastructure failure: don't consume heat
+                heat = heat.saturating_sub(1);
+                if infra_retries >= MAX_INFRA_RETRIES {
+                    break;
                 }
                 continue;
             }
@@ -973,8 +987,14 @@ async fn strike_ingot(
                     if output_mode.is_verbose() {
                         println!("\x1b[31m✗\x1b[0m smith output missing \"CMD:\" line");
                     } else {
-                        println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
+                        println!("    \x1b[31m↺\x1b[0m protocol retry (heat {heat}/{} not consumed)", heat_max);
                     }
+                }
+                // Protocol failure: don't consume heat
+                heat = heat.saturating_sub(1);
+                infra_retries = infra_retries.saturating_add(1);
+                if infra_retries >= MAX_INFRA_RETRIES {
+                    break;
                 }
                 continue;
             }
@@ -1001,8 +1021,14 @@ async fn strike_ingot(
                 if output_mode.is_verbose() {
                     println!("\x1b[31m✗\x1b[0m smith output has placeholder/invalid CMD line");
                 } else {
-                    println!("    \x1b[31m↺\x1b[0m heat {heat}/{} failed", heat_max);
+                    println!("    \x1b[31m↺\x1b[0m protocol retry (heat {heat}/{} not consumed)", heat_max);
                 }
+            }
+            // Protocol failure: don't consume heat
+            heat = heat.saturating_sub(1);
+            infra_retries = infra_retries.saturating_add(1);
+            if infra_retries >= MAX_INFRA_RETRIES {
+                break;
             }
             continue;
         }
@@ -1173,21 +1199,26 @@ async fn strike_ingot(
         worktree::cleanup_without_merge(&active_ingot.id).await;
     }
 
-    if smith_invoke_fail_count >= active_ingot.max.max(1) {
+    // If ALL failures were infrastructure/protocol (no real experiments ran),
+    // return SmithFailed so the chain can try the next smith.
+    let no_real_experiments = infra_retries > 0
+        && smith_invoke_fail_count + protocol_cmd_fail_count == infra_retries;
+
+    if no_real_experiments || (infra_retries >= MAX_INFRA_RETRIES && smith_invoke_fail_count > 0) {
         return Err(SlagError::SmithFailed(format!(
-            "smith invocation failed on all {}/{} heats; smith={}",
+            "smith invocation failed on all {}/{} attempts; smith={}",
             smith_invoke_fail_count,
-            active_ingot.max.max(1),
+            infra_retries,
             tui::truncate(smith_hint, 120)
         )));
     }
 
-    if protocol_cmd_fail_count >= active_ingot.max.max(1) {
+    if no_real_experiments || (infra_retries >= MAX_INFRA_RETRIES && protocol_cmd_fail_count > 0) {
         return Err(SlagError::SmithFailed(format!(
-            "smith protocol failure for [{}]: missing/invalid CMD on all {}/{} heats; smith={}",
+            "smith protocol failure for [{}]: missing/invalid CMD on {}/{} attempts; smith={}",
             active_ingot.id,
             protocol_cmd_fail_count,
-            active_ingot.max.max(1),
+            infra_retries,
             tui::truncate(smith_hint, 120)
         )));
     }
@@ -1586,7 +1617,7 @@ mod tests {
         let result = strike_ingot(&ingot, &smith, "mock-smith", false, OutputMode::Quiet).await;
         match result {
             Err(SlagError::SmithFailed(msg)) => {
-                assert!(msg.contains("missing/invalid CMD on all 2/2 heats"));
+                assert!(msg.contains("missing/invalid CMD on"));
             }
             other => panic!("expected smith protocol failure, got {other:?}"),
         }
