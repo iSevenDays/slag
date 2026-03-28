@@ -41,7 +41,7 @@
         "name": "sliday",
         "url": "https://github.com/sliday"
       },
-      "softwareVersion": "1.3.38",
+      "softwareVersion": "1.3.39",
       "codeRepository": "https://github.com/sliday/slag",
       "programmingLanguage": ["Rust", "Bash"],
       "keywords": ["AI", "task orchestrator", "developer tools", "claude", "codex", "gemini", "kimi", "opencode"]
@@ -330,30 +330,17 @@ EOF</code>
 </pre>
 
         <h3 style="margin-top: 1.5lh;">Structured Experiment Ledger</h3>
-        <p>Every heat&mdash;success and failure&mdash;is recorded as a JSONL line in <code>logs/experiments.jsonl</code>:</p>
+        <p>Every heat&mdash;success and failure&mdash;is recorded in <a href="https://github.com/toon-format/toon" target="_blank" rel="noopener noreferrer">TOON</a> (Token-Oriented Object Notation) tabular format in <code>logs/experiments.toon</code>. Field names appear once in the header; rows are compact comma-separated values:</p>
 <pre box="square" style="font-size: 0.8rem; overflow-x: auto;">
-{
-  "ts": "2026-03-28T14:21:03Z",
-  "ingot_id": "i1",
-  "cycle": 1,
-  "heat": 1,
-  "smith_cmd": "claude -p ...",
-  "status": "<span style="color:var(--slag-pure);">forged</span>",
-  "duration_secs": 19,
-  "proof_exit": 0,
-  "proof_cmd": "node --check server.js",
-  "commit_hash": "<span style="color:var(--slag-cold);">5f6a2d7</span>",
-  "files_changed": 3,
-  "description": "Create HTTP server"
-}
+[*]{<span style="color:var(--slag-cold);">ts,id,cy,h,smith,status,dur,exit,proof,hash,files,desc</span>}:
+  2026-03-28T14:21:03Z,i1,1,1,claude -p ...,<span style="color:var(--slag-pure);">forged</span>,19,0,node --check server.js,<span style="color:var(--slag-cold);">5f6a2d7</span>,3,Create HTTP server
+  2026-03-28T14:21:19Z,i2,1,1,claude -p ...,<span style="color:var(--slag-warm);">reverted</span>,35,1,npm test,,2,"CMD failed: TypeError"
 </pre>
-        <p style="margin-top: 1lh;">On retry, the smith receives structured experiment history instead of just a raw "CRACKED" message:</p>
+        <p style="margin-top: 1lh;">On retry, the smith receives compact TOON history instead of verbose prose:</p>
 <pre box="square" style="font-size: 0.85rem;">
-=== EXPERIMENT HISTORY (<span style="color:var(--slag-bright);">i3</span>) ===
-Heat 1: <span style="color:var(--slag-warm);">reverted</span> (47s) &mdash; "TypeError: foo is not a function" [<span style="color:var(--slag-cold);">a1b2c3d</span>]
-Heat 2: <span style="color:var(--slag-warm);">reverted</span> (23s) &mdash; "Module not found: bar" [<span style="color:var(--slag-cold);">e4f5g6h</span>]
-Heat 3: <span style="color:var(--slag-pure);">(current)</span>
-===
+HISTORY(<span style="color:var(--slag-bright);">i3</span>)[2]{<span style="color:var(--slag-cold);">h,status,dur,err,hash</span>}:
+  1,<span style="color:var(--slag-warm);">reverted</span>,47,TypeError: foo is not a function,<span style="color:var(--slag-cold);">a1b2c3d</span>
+  2,<span style="color:var(--slag-warm);">reverted</span>,23,"Module not found: bar",<span style="color:var(--slag-cold);">e4f5g6h</span>
 </pre>
 
         <h3 style="margin-top: 1.5lh;">Git as Memory</h3>

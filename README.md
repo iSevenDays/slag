@@ -8,6 +8,13 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.39
+
+- **TOON tabular experiment ledger**: experiment log switched from JSONL to [TOON](https://github.com/toon-format/toon) (Token-Oriented Object Notation) tabular format. Field names written once in header, rows are compact comma-separated values. ~21% smaller on disk, larger savings when injected into smith prompts. Legacy JSONL files still readable (automatic fallback).
+- **Compact crucible in prompts**: forge prompts now include a summary + current ingot + cracked ingots only, instead of the full PLAN.md. 57% reduction for small projects, 95%+ for large ones (50+ ingots).
+- **TOON history injection**: retry prompts use compact tabular format (`HISTORY(id)[N]{h,status,dur,err,hash}:`) instead of verbose prose blocks.
+- **Shorter section headers**: `=== BLUEPRINT ===` → `[BLUEPRINT]` across all flux prompts. Small per-prompt savings that compound over hundreds of invocations.
+
 ## What's new in v1.3.38
 
 - **Experiment-driven forge loop** (inspired by [autoresearch](https://github.com/karpathy/autoresearch)): every heat is now a tracked experiment. Smith work is git-committed BEFORE verification; failures are git-reverted but preserved in history. Enable with `SLAG_GIT_EXPERIMENTS=1` or `--worktree` (always active).
@@ -374,7 +381,7 @@ Final report. Counts forged vs cracked, writes results to `PROGRESS.md`.
 | `PHASES.md` | Quarried build phases (multi-phase runs) |
 | `AGENTS.md` | Agent recipe docs |
 | `logs/` | Debug logs (slag heap) |
-| `logs/experiments.jsonl` | Structured experiment ledger (JSONL) |
+| `logs/experiments.toon` | Structured experiment ledger (TOON tabular) |
 
 ## Development
 
