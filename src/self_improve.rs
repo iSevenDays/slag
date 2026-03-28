@@ -266,6 +266,13 @@ async fn merge_and_cleanup(
     source_dir: &Path,
     sandbox: &Path,
 ) -> Result<(), SlagError> {
+    // Stash any local changes (e.g. auto-committed PROGRESS.md) before merge
+    let _ = tokio::process::Command::new("git")
+        .args(["stash", "--include-untracked"])
+        .current_dir(source_dir)
+        .output()
+        .await;
+
     let output = tokio::process::Command::new("git")
         .args(["merge", BRANCH_NAME, "--no-edit"])
         .current_dir(source_dir)
@@ -292,6 +299,13 @@ async fn merge_and_cleanup(
     // Delete branch
     let _ = tokio::process::Command::new("git")
         .args(["branch", "-D", BRANCH_NAME])
+        .current_dir(source_dir)
+        .output()
+        .await;
+
+    // Restore stashed changes
+    let _ = tokio::process::Command::new("git")
+        .args(["stash", "pop"])
         .current_dir(source_dir)
         .output()
         .await;
