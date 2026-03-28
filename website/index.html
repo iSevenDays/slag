@@ -41,7 +41,7 @@
         "name": "sliday",
         "url": "https://github.com/sliday"
       },
-      "softwareVersion": "1.3.37",
+      "softwareVersion": "1.3.38",
       "codeRepository": "https://github.com/sliday/slag",
       "programmingLanguage": ["Rust", "Bash"],
       "keywords": ["AI", "task orchestrator", "developer tools", "claude", "codex", "gemini", "kimi", "opencode"]
@@ -316,42 +316,45 @@ EOF</code>
       <section>
         <h2>Experiment Loop</h2>
         <p>Since v1.3.37, slag's forge loop follows an experiment-driven pattern inspired by autonomous research systems:</p>
-        <div class="quickstart-box" box="square">
-          <div class="cmd-line">
-            <span class="cmd-comment"># the forge heat loop (per ingot)</span>
-            <code>1. Prepare flux (prompt with blueprint + experiment history)
+<pre box="square" style="font-size: 0.85rem;">
+<span style="color:var(--foreground2);"># the forge heat loop (per ingot)</span>
+1. Prepare flux (prompt with blueprint + experiment history)
 2. Invoke smith (time-budgeted via :budget)
 3. Extract CMD from response
-4. Git commit BEFORE verification (experiment: {id} heat {n})
+4. Git commit BEFORE verification  <span style="color:var(--slag-cold);">(experiment: {id} heat {n})</span>
 5. Run CMD + proof verification
-6. If pass  &rarr; keep commit, record "forged" in ledger
-7. If fail  &rarr; git revert, record "reverted" in ledger
-8. If infra &rarr; don't consume heat, retry (up to 6 free retries)
-9. Repeat with structured experiment history in next prompt</code>
-          </div>
-        </div>
+6. If pass  <span style="color:var(--slag-pure);">&rarr; keep commit</span>, record "forged" in ledger
+7. If fail  <span style="color:var(--slag-warm);">&rarr; git revert</span>, record "reverted" in ledger
+8. If infra <span style="color:var(--slag-cold);">&rarr; don't consume heat</span>, retry (up to 6 free)
+9. Repeat with structured experiment history in next prompt
+</pre>
 
         <h3 style="margin-top: 1.5lh;">Structured Experiment Ledger</h3>
         <p>Every heat&mdash;success and failure&mdash;is recorded as a JSONL line in <code>logs/experiments.jsonl</code>:</p>
-        <div class="quickstart-box" box="square">
-          <div class="cmd-line">
-            <code>{"ts":"2026-03-28T14:21:03Z","ingot_id":"i1","cycle":1,"heat":1,
- "smith_cmd":"claude -p ...","status":"forged","duration_secs":19,
- "proof_exit":0,"proof_cmd":"node --check server.js",
- "commit_hash":"5f6a2d7","files_changed":3,
- "description":"Create HTTP server"}</code>
-          </div>
-        </div>
+<pre box="square" style="font-size: 0.8rem; overflow-x: auto;">
+{
+  "ts": "2026-03-28T14:21:03Z",
+  "ingot_id": "i1",
+  "cycle": 1,
+  "heat": 1,
+  "smith_cmd": "claude -p ...",
+  "status": "<span style="color:var(--slag-pure);">forged</span>",
+  "duration_secs": 19,
+  "proof_exit": 0,
+  "proof_cmd": "node --check server.js",
+  "commit_hash": "<span style="color:var(--slag-cold);">5f6a2d7</span>",
+  "files_changed": 3,
+  "description": "Create HTTP server"
+}
+</pre>
         <p style="margin-top: 1lh;">On retry, the smith receives structured experiment history instead of just a raw "CRACKED" message:</p>
-        <div class="quickstart-box" box="square">
-          <div class="cmd-line">
-            <code>=== EXPERIMENT HISTORY (i3) ===
-Heat 1: reverted (47s) &mdash; "TypeError: foo is not a function" [a1b2c3d]
-Heat 2: reverted (23s) &mdash; "Module not found: bar" [e4f5g6h]
-Heat 3: (current)
-===</code>
-          </div>
-        </div>
+<pre box="square" style="font-size: 0.85rem;">
+=== EXPERIMENT HISTORY (<span style="color:var(--slag-bright);">i3</span>) ===
+Heat 1: <span style="color:var(--slag-warm);">reverted</span> (47s) &mdash; "TypeError: foo is not a function" [<span style="color:var(--slag-cold);">a1b2c3d</span>]
+Heat 2: <span style="color:var(--slag-warm);">reverted</span> (23s) &mdash; "Module not found: bar" [<span style="color:var(--slag-cold);">e4f5g6h</span>]
+Heat 3: <span style="color:var(--slag-pure);">(current)</span>
+===
+</pre>
 
         <h3 style="margin-top: 1.5lh;">Git as Memory</h3>
         <p>Failed experiments stay in git history via <code>git revert</code> (not <code>git reset</code>). The smith can see what was tried by reading the log. Enable with <code>SLAG_GIT_EXPERIMENTS=1</code> or use <code>--worktree</code> mode (always active there).</p>

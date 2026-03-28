@@ -8,6 +8,17 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.3.38
+
+- **Experiment-driven forge loop** (inspired by [autoresearch](https://github.com/karpathy/autoresearch)): every heat is now a tracked experiment. Smith work is git-committed BEFORE verification; failures are git-reverted but preserved in history. Enable with `SLAG_GIT_EXPERIMENTS=1` or `--worktree` (always active).
+- **Structured experiment ledger**: every heat (success and failure) recorded as JSONL in `logs/experiments.jsonl` with timing, commit hash, status, and description.
+- **History-informed retries**: on retry, the smith receives structured experiment history (heat #, status, duration, error) instead of raw "CRACKED" messages.
+- **Per-ingot time budget**: new `:budget N` field caps smith invocation wall-clock time per heat. Configurable via `SLAG_INGOT_BUDGET_SECS` env or per-ingot field.
+- **Crash recovery protocol**: infrastructure failures (smith timeout, rate limit, missing CMD) no longer consume heats. Only real experiments count. Up to 6 free infra retries before chain failover.
+- **Smart output truncation** (inspired by [pi coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)): slag messages keep first 5 + last 30 lines, capped at 4KB. Full output in logs.
+- **Structured failure context**: retry messages use typed fields (Type, Exit, CMD, Files changed) instead of raw output dumps.
+- **Flux caching**: blueprint and alloy files read once per ingot, reused across heats instead of re-reading from disk every heat.
+
 ## What's new in v1.3.37
 
 - **Claude auto-detect guardrail:** if `ANTHROPIC_API_KEY` is present, auto-detection skips Claude while other supported smith CLIs are available, avoiding accidental API-key billing.
@@ -158,6 +169,8 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `SLAG_PROMPT_REPEAT_MODE` | `non-plan` | Prompt repetition mode (`off`, `non-plan`, `always`) |
 | `SLAG_PROMPT_REPEAT_COUNT` | `2` | Prompt repetitions when enabled (clamped `1..4`) |
 | `SLAG_PROMPT_REPEAT_MAX_CHARS` | `40000` | Full repetition up to this size; partial tail repetition above |
+| `SLAG_GIT_EXPERIMENTS` | unset | Enable git commit-before-verify / revert-on-fail experiment tracking (`1` or `true`) |
+| `SLAG_INGOT_BUDGET_SECS` | unset | Default per-ingot wall-clock time budget in seconds (0 = disabled) |
 
 When `SLAG_SMITH` is unset, slag picks the first compatible smith in this order:
 `claude`, `codex`, `gemini`, `opencode`, `kimi` (Claude-compatible), then native `kimi` as last fallback.
@@ -346,6 +359,7 @@ Final report. Counts forged vs cracked, writes results to `PROGRESS.md`.
 | `:heat` | 0-N | Current retry attempt |
 | `:max` | 5-8+ | Max retries before cracking |
 | `:smelt` | 0-2+ | Re-smelt/reconsider count (0 = never, 1 = re-smelted, 2 = reconsidered) |
+| `:budget` | seconds (optional) | Per-ingot wall-clock time limit for smith invocation |
 | `:proof` | shell command | Acceptance test (exit 0 = pass) |
 | `:work` | string | Task description for the AI |
 
@@ -360,6 +374,7 @@ Final report. Counts forged vs cracked, writes results to `PROGRESS.md`.
 | `PHASES.md` | Quarried build phases (multi-phase runs) |
 | `AGENTS.md` | Agent recipe docs |
 | `logs/` | Debug logs (slag heap) |
+| `logs/experiments.jsonl` | Structured experiment ledger (JSONL) |
 
 ## Development
 
