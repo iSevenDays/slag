@@ -325,17 +325,45 @@ async fn clone_upstream() -> Result<PathBuf, SlagError> {
     let ts = chrono::Utc::now().timestamp();
     let sandbox = PathBuf::from(format!("/tmp/slag-self-improve-{ts}"));
 
-    let output = tokio::process::Command::new("git")
-        .args(["clone", "--depth", "1", UPSTREAM_REPO, sandbox.to_str().unwrap()])
+    // Fork + clone via gh (creates fork if needed, clones with push access)
+    let output = tokio::process::Command::new("gh")
+        .args([
+            "repo",
+            "fork",
+            GH_REPO,
+            "--clone",
+            "--remote",
+            &format!("--clone-dir={}", sandbox.to_str().unwrap()),
+        ])
         .output()
-        .await
-        .map_err(|e| SlagError::WorktreeError(format!("git clone failed: {e}")))?;
+        .await;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(SlagError::WorktreeError(format!(
-            "git clone failed: {stderr}"
-        )));
+    // gh repo fork --clone may fail if already forked or gh not configured for fork
+    // Fall back to plain git clone
+    let forked = output
+        .as_ref()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !forked {
+        let output = tokio::process::Command::new("git")
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                UPSTREAM_REPO,
+                sandbox.to_str().unwrap(),
+            ])
+            .output()
+            .await
+            .map_err(|e| SlagError::WorktreeError(format!("git clone failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(SlagError::WorktreeError(format!(
+                "git clone failed: {stderr}"
+            )));
+        }
     }
 
     Ok(sandbox)
