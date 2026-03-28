@@ -302,6 +302,7 @@ mod tests {
             smelt: 1,
             proof: "test -f newfile".into(),
             work: "Rewritten task".into(),
+            budget: None,
             extra: vec![],
         };
         c.replace("i1", vec![new_ingot]);
@@ -325,6 +326,7 @@ mod tests {
             smelt: 1,
             proof: "true".into(),
             work: "Sub-task A".into(),
+            budget: None,
             extra: vec![],
         };
         let sub_b = Ingot {
@@ -338,6 +340,7 @@ mod tests {
             smelt: 1,
             proof: "true".into(),
             work: "Sub-task B".into(),
+            budget: None,
             extra: vec![],
         };
         c.replace("i1", vec![sub_a, sub_b]);

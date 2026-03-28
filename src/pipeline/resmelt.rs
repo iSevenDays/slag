@@ -426,6 +426,7 @@ mod tests {
             smelt,
             proof: proof.to_string(),
             work: work.to_string(),
+            budget: None,
             extra: vec![],
         }
     }

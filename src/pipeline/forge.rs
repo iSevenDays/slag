@@ -1414,6 +1414,7 @@ mod tests {
             smelt: 0,
             proof: "true".to_string(),
             work: "noop".to_string(),
+            budget: None,
             extra: vec![],
         }
     }

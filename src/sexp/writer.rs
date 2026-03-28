@@ -20,6 +20,11 @@ pub fn write_ingot(ingot: &Ingot) -> String {
         work,
     );
 
+    // Append budget if present
+    if let Some(budget) = ingot.budget {
+        s.push_str(&format!(" :budget {budget}"));
+    }
+
     // Append unknown extra fields for forward compatibility
     for (key, value) in &ingot.extra {
         // If value looks like it needs quoting (contains spaces), quote it
@@ -67,6 +72,7 @@ mod tests {
             smelt: 0,
             proof: "test -f index.html".into(),
             work: "Create HTML structure".into(),
+            budget: None,
             extra: vec![],
         };
         let s = write_ingot(&ingot);
@@ -92,6 +98,7 @@ mod tests {
             smelt: 1,
             proof: "npm test".into(),
             work: "Deploy app".into(),
+            budget: None,
             extra: vec![],
         };
         let s = write_ingot(&ingot);
@@ -113,6 +120,7 @@ mod tests {
             smelt: 0,
             proof: "true".into(),
             work: "test".into(),
+            budget: None,
             extra: vec![("custom".into(), "hello".into())],
         };
         let s = write_ingot(&ingot);
@@ -132,6 +140,7 @@ mod tests {
             smelt: 0,
             proof: "grep -q 'A\\|B'".into(),
             work: "He said \"ok\"".into(),
+            budget: None,
             extra: vec![],
         };
         let s = write_ingot(&ingot);

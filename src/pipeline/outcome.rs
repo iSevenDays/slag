@@ -765,6 +765,7 @@ fn synthetic_repair_ingot(
             "Fix outcome validation failure and make TEST pass: {}",
             summary
         ),
+        budget: None,
         extra: vec![],
     }
 }
@@ -1056,6 +1057,7 @@ TEST: npm test
                 smelt: 0,
                 proof: "true".into(),
                 work: "existing".into(),
+                budget: None,
                 extra: vec![],
             }],
         );
@@ -1071,6 +1073,7 @@ TEST: npm test
             smelt: 9,
             proof: "".into(),
             work: "".into(),
+            budget: None,
             extra: vec![],
         }];
 

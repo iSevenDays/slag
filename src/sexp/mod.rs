@@ -84,6 +84,8 @@ pub struct Ingot {
     pub smelt: u8,
     pub proof: String,
     pub work: String,
+    /// Per-ingot wall-clock time budget in seconds (optional).
+    pub budget: Option<u64>,
     /// Preserve unknown fields for forward compatibility
     pub extra: Vec<(String, String)>,
 }

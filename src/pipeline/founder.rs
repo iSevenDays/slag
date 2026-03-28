@@ -391,6 +391,7 @@ mod tests {
             smelt: 0,
             proof: "cargo test --all".to_string(),
             work: "Implement feature".to_string(),
+            budget: None,
             extra: vec![],
         }
     }

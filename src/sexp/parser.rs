@@ -2,7 +2,7 @@ use super::{Ingot, Skill, Status};
 
 /// Known field names that map to typed struct fields
 const KNOWN_FIELDS: &[&str] = &[
-    "id", "status", "solo", "grade", "skill", "heat", "max", "smelt", "proof", "work",
+    "id", "status", "solo", "grade", "skill", "heat", "max", "smelt", "proof", "work", "budget",
 ];
 const INGOT_PREFIX: &str = "(ingot";
 
@@ -44,6 +44,7 @@ pub fn parse_ingot(line: &str) -> Option<Ingot> {
     let smelt = get("smelt").and_then(|s| s.parse().ok()).unwrap_or(0);
     let proof = get("proof").unwrap_or_else(|| "true".into());
     let work = get("work").unwrap_or_default();
+    let budget = get("budget").and_then(|s| s.parse::<u64>().ok());
 
     let extra: Vec<(String, String)> = fields
         .into_iter()
@@ -61,6 +62,7 @@ pub fn parse_ingot(line: &str) -> Option<Ingot> {
         smelt,
         proof,
         work,
+        budget,
         extra,
     })
 }
