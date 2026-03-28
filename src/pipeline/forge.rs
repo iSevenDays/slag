@@ -1780,4 +1780,49 @@ mod tests {
         let result = strike_ingot_with_chain(&ingot, &chain, false, OutputMode::Quiet).await;
         assert!(result.is_ok(), "expected smith chain fallback to recover");
     }
+
+    #[test]
+    fn truncate_output_short_passes_through() {
+        let short = "line 1\nline 2\nline 3\n";
+        assert_eq!(truncate_output(short), short);
+    }
+
+    #[test]
+    fn truncate_output_long_keeps_head_and_tail() {
+        let lines: Vec<String> = (1..=100).map(|i| format!("line {i}")).collect();
+        let long = lines.join("\n");
+        let truncated = truncate_output(&long);
+        assert!(truncated.contains("line 1"));
+        assert!(truncated.contains("line 5"));
+        assert!(truncated.contains("line 100"));
+        assert!(truncated.contains("[...truncated"));
+        assert!(!truncated.contains("line 20\n"));
+    }
+
+    #[test]
+    fn truncate_output_respects_byte_cap() {
+        let huge = "x".repeat(10_000);
+        let truncated = truncate_output(&huge);
+        assert!(truncated.len() <= TRUNCATE_MAX_BYTES + 40);
+    }
+
+    #[test]
+    fn format_slag_message_is_structured() {
+        let msg = format_slag_message("cmd_failure", 1, "npm test", "error: things broke", 3);
+        assert!(msg.contains("=== HEAT FAILED ==="));
+        assert!(msg.contains("Type: cmd_failure"));
+        assert!(msg.contains("Exit: 1"));
+        assert!(msg.contains("CMD: npm test"));
+        assert!(msg.contains("Files changed: 3"));
+        assert!(msg.contains("error: things broke"));
+    }
+
+    #[test]
+    fn failure_signature_skips_structured_header() {
+        let structured = "=== HEAT FAILED ===\nType: cmd_failure\nExit: 1\nCMD: npm test\nFiles changed: 2\nError output:\nerror: actual problem\nat src/main.rs:42\n===";
+        let sig = failure_signature(structured);
+        assert!(sig.contains("error: actual problem"));
+        assert!(!sig.contains("HEAT FAILED"));
+        assert!(!sig.contains("Type:"));
+    }
 }
