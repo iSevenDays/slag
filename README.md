@@ -10,9 +10,11 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ## What's new in v1.4.0
 
-- **`slag self-improve` — slag can now improve its own codebase.** New subcommand that runs the full forge pipeline against slag's own source in an isolated git worktree sandbox. Measures before/after metrics (test count, clippy warnings), keeps if improved, discards if not. Zero pollution — slag artifacts stay in the sandbox, only source changes merge to main.
-- **Targets:** `slag self-improve quality` (clippy), `slag self-improve tests` (coverage), `slag self-improve performance` (allocations), `slag self-improve tokens` (prompt sizes).
-- **First verified self-improvement:** slag fixed its own pre-existing clippy warning at `config.rs:345` (needless borrow) that persisted across 5+ releases. Surveyed → 3 ingots → forged all on heat 1 → outcome PASS → merged. `clippy: -2, tests: +0`.
+- **`slag self-improve` — slag can improve its own codebase and submit PRs.** Clones from GitHub, forges improvements in `/tmp/` sandbox, measures before/after metrics (tests, clippy), and creates a PR via `gh` if improved. Anyone can contribute improvements without touching the source repo directly.
+- **Freeform targets:** `slag self-improve quality` (predefined) or `slag self-improve "Add streaming support to smith output"` (any freeform text becomes a commission).
+- **Existing PR detection:** before starting, queries GitHub for open self-improve PRs. Shows a TUI picker to continue an existing PR or start fresh.
+- **Predefined targets:** `quality` (clippy), `tests` (coverage), `performance` (allocations), `tokens` (prompt sizes).
+- **First verified self-improvement:** slag fixed its own pre-existing clippy warning at `config.rs:345` (needless borrow) that persisted across 5+ releases.
 
 ## What's new in v1.3.39
 
@@ -133,7 +135,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `slag status` | Show crucible state (ingot counts and progress) |
 | `slag resume` | Resume an existing forge |
 | `slag update` | Self-update to latest release |
-| `slag self-improve [target]` | Run slag on its own codebase (quality\|tests\|performance\|tokens) |
+| `slag self-improve [target]` | Self-improve slag's code via GitHub clone + PR (freeform or predefined target) |
 
 **Options:**
 

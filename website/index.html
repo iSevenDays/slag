@@ -403,73 +403,42 @@ HISTORY(<span style="color:var(--slag-bright);">i3</span>)[2]{<span style="color
       <!-- SELF-IMPROVEMENT -->
       <section>
         <h2>Self-Improvement</h2>
-        <p>Since v1.4.0, slag can improve its own codebase:</p>
+        <p>Since v1.4.0, anyone can improve slag's codebase and submit a PR:</p>
         <div class="install-hero" box="double">
           <div class="cmd-line">
-            <code data-copy style="font-size: 1.1rem;">slag self-improve quality</code>
+            <code data-copy style="font-size: 1.1rem;">slag self-improve "Add streaming support to smith output"</code>
           </div>
-          <p style="color: var(--foreground2); font-size: 0.85rem; margin-top: 0.5lh;">Runs the full forge pipeline against slag's own source in a worktree sandbox</p>
+          <p style="color: var(--foreground2); font-size: 0.85rem; margin-top: 0.5lh;">Clones from GitHub, forges improvements, measures metrics, creates PR</p>
         </div>
+        <p style="margin-top: 1lh;">Predefined shortcuts: <code>quality</code>, <code>tests</code>, <code>performance</code>, <code>tokens</code>. Or pass any freeform text as a commission.</p>
 
         <h3 style="margin-top: 1.5lh;">How It Works</h3>
 <pre box="square" style="font-size: 0.85rem;">
-main repo (clean) ──┐
-                     │ git worktree add /tmp/slag-self-improve
-                     v
-/tmp/sandbox/           <span style="color:var(--slag-cold);">&larr; slag runs HERE</span>
-  ├── src/*.rs            (edited by smith)
-  ├── PLAN.md             (artifact &mdash; stays in sandbox)
-  ├── logs/               (artifact &mdash; stays in sandbox)
-                     │
-                     │ if <span style="color:var(--slag-pure);">improved</span> &rarr; merge source changes to main
-                     │ if <span style="color:var(--slag-warm);">not</span> &rarr; discard sandbox
-                     v
-main repo (clean, possibly improved)
+<span style="color:var(--slag-cold);">1.</span> Check for existing self-improve PRs on GitHub
+   <span style="color:var(--foreground2);">[N]ew / [1-3] continue existing / [Q]uit</span>
+<span style="color:var(--slag-cold);">2.</span> git clone github.com/sliday/slag <span style="color:var(--slag-cold);">&rarr; /tmp/sandbox</span>
+<span style="color:var(--slag-warm);">3.</span> Measure baseline (tests, clippy)
+<span style="color:var(--slag-hot);">4.</span> Forge improvements in sandbox
+<span style="color:var(--slag-bright);">5.</span> Measure after &mdash; compare metrics
+<span style="color:var(--slag-pure);">6.</span> If improved <span style="color:var(--slag-pure);">&rarr;</span> <code>gh pr create</code> with metrics table
+   If not <span style="color:var(--slag-warm);">&rarr;</span> discard sandbox
 </pre>
+        <p style="margin-top: 1lh;">Requirements: <code>gh</code> CLI (authenticated) + any smith CLI. Works from any machine &mdash; no need to clone slag manually.</p>
 
-        <h3 style="margin-top: 1.5lh;">Targets</h3>
-        <table class="field-table" style="margin-top: 0.5lh;">
-          <thead>
-            <tr>
-              <th>Target</th>
-              <th>Measures</th>
-              <th>Commission</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>quality</code></td>
-              <td>clippy warnings</td>
-              <td>Fix clippy warnings in pipeline and flux modules</td>
-            </tr>
-            <tr>
-              <td><code>tests</code></td>
-              <td>test count</td>
-              <td>Add unit tests for untested functions</td>
-            </tr>
-            <tr>
-              <td><code>performance</code></td>
-              <td>allocations</td>
-              <td>Reduce unnecessary allocations in forge loop</td>
-            </tr>
-            <tr>
-              <td><code>tokens</code></td>
-              <td>prompt size</td>
-              <td>Compress prompts in flux.rs</td>
-            </tr>
-          </tbody>
-        </table>
+        <h3 style="margin-top: 1.5lh;">PR Format</h3>
+        <p>Each PR includes a metrics table showing exactly what improved:</p>
+<pre box="square" style="font-size: 0.85rem;">
+<span style="color:var(--slag-bright);">## Metrics</span>
+
+| Metric          | Before | After | Delta |
+|-----------------|--------|-------|-------|
+| Tests pass      | 138    | 143   | <span style="color:var(--slag-pure);">+5</span>    |
+| Tests fail      | 0      | 0     | 0     |
+| Clippy warnings | 2      | 0     | <span style="color:var(--slag-pure);">-2</span>    |
+</pre>
 
         <h3 style="margin-top: 1.5lh;">First Self-Improvement</h3>
-        <p>slag's first verified self-improvement fixed a clippy warning at <code>config.rs:345</code> that persisted across 5+ releases:</p>
-<pre box="square" style="font-size: 0.85rem;">
-<span style="color:var(--slag-cold);">baseline:</span> tests: 138 pass / 0 fail, clippy: 2 warnings
-<span style="color:var(--slag-pure);">after:</span>    tests: 138 pass / 0 fail, clippy: 0 warnings
-<span style="color:var(--slag-bright);">delta:</span>    tests: +0, clippy: <span style="color:var(--slag-pure);">-2</span>
-
-<span style="color:var(--slag-pure);">&gt;&gt;</span> Self-improvement accepted (tests: +0, clippy: -2)
-</pre>
-        <p style="margin-top: 1lh;">The loop: <span style="color:var(--foreground1);">old binary orchestrates &rarr; smith edits src/*.rs &rarr; cargo test verifies &rarr; metrics compared &rarr; merge if improved</span>. Zero pollution &mdash; slag artifacts stay in the sandbox, only source changes reach main.</p>
+        <p>slag's first verified self-improvement fixed a clippy warning at <code>config.rs:345</code> that persisted across 5+ releases. Surveyed its own source &rarr; 3 ingots &rarr; forged all on heat 1 &rarr; outcome PASS &rarr; merged.</p>
       </section>
 
       <div is="separator"></div>
