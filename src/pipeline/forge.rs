@@ -766,6 +766,7 @@ async fn strike_ingot(
     let mut smith_invoke_fail_count = 0u8;
     let mut consecutive_identical_failures = 0u8;
     let mut last_failure_sig = String::new();
+    let use_git_experiments = worktree_mode || proof::git_experiments_enabled();
 
     // Create worktree if in worktree mode
     if worktree_mode {
@@ -991,6 +992,17 @@ async fn strike_ingot(
             tui::flush();
         }
 
+        // Git experiment: commit smith's work BEFORE verification
+        let experiment_hash = if use_git_experiments {
+            if let Some(ref wt_path) = worktree_path {
+                proof::git_experiment_commit_in_dir(&active_ingot.id, heat, wt_path).await
+            } else {
+                proof::git_experiment_commit(&active_ingot.id, heat).await
+            }
+        } else {
+            None
+        };
+
         // Run CMD (in worktree if applicable)
         let (ok, output) = if let Some(ref wt_path) = worktree_path {
             proof::run_shell_in_dir(&cmd, Path::new(wt_path)).await
@@ -1020,17 +1032,30 @@ async fn strike_ingot(
                         cycle: forge_cycle,
                         heat,
                         smith_cmd: smith_hint.to_string(),
-                        status: "cracked".to_string(),
+                        status: if experiment_hash.is_some() {
+                            "reverted"
+                        } else {
+                            "cracked"
+                        }
+                        .to_string(),
                         duration_secs: heat_start.elapsed().as_secs(),
                         proof_exit: 1,
                         proof_cmd: active_ingot.proof.clone(),
-                        commit_hash: None,
+                        commit_hash: experiment_hash.clone(),
                         files_changed: ledger::git_files_changed(),
                         description: format!(
                             "Proof failed: {}",
                             tui::truncate(&proof_output, 120)
                         ),
                     });
+                    // Revert experiment commit on proof failure
+                    if experiment_hash.is_some() {
+                        if let Some(ref wt_path) = worktree_path {
+                            proof::git_revert_last_in_dir(wt_path).await;
+                        } else {
+                            proof::git_revert_last().await;
+                        }
+                    }
                     slag = Some(format!(
                         "Proof failed [{}]: {proof_output}",
                         active_ingot.proof
@@ -1074,7 +1099,7 @@ async fn strike_ingot(
                 duration_secs: heat_start.elapsed().as_secs(),
                 proof_exit: 0,
                 proof_cmd: active_ingot.proof.clone(),
-                commit_hash: ledger::git_head_short(),
+                commit_hash: experiment_hash.clone().or_else(|| ledger::git_head_short()),
                 files_changed: ledger::git_files_changed(),
                 description: tui::truncate(&active_ingot.work, 120),
             });
@@ -1090,17 +1115,25 @@ async fn strike_ingot(
                 heat_used: heat,
             });
         } else {
+            // Revert experiment commit on CMD failure
+            if experiment_hash.is_some() {
+                if let Some(ref wt_path) = worktree_path {
+                    proof::git_revert_last_in_dir(wt_path).await;
+                } else {
+                    proof::git_revert_last().await;
+                }
+            }
             ledger::append_record(&ExperimentRecord {
                 ts: chrono::Utc::now().to_rfc3339(),
                 ingot_id: active_ingot.id.clone(),
                 cycle: forge_cycle,
                 heat,
                 smith_cmd: smith_hint.to_string(),
-                status: "cracked".to_string(),
+                status: "reverted".to_string(),
                 duration_secs: heat_start.elapsed().as_secs(),
                 proof_exit: 1,
                 proof_cmd: cmd.clone(),
-                commit_hash: None,
+                commit_hash: experiment_hash.clone(),
                 files_changed: ledger::git_files_changed(),
                 description: format!("CMD failed: {}", tui::truncate(&output, 120)),
             });

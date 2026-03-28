@@ -138,6 +138,102 @@ pub async fn git_commit(id: &str, work: &str) {
         .await;
 }
 
+/// Git experiment commit: stage all changes and commit with experiment prefix.
+/// Returns the short commit hash on success.
+pub async fn git_experiment_commit(id: &str, heat: u8) -> Option<String> {
+    let msg = format!("experiment: {id} heat {heat}");
+    let _ = tokio::process::Command::new("git")
+        .args(["add", "-A"])
+        .output()
+        .await;
+    let output = tokio::process::Command::new("git")
+        .args(["commit", "-m", &msg, "--quiet", "--allow-empty"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // Return short hash of the new commit
+    tokio::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// Git experiment commit in a specific directory (worktree).
+pub async fn git_experiment_commit_in_dir(id: &str, heat: u8, dir: &str) -> Option<String> {
+    let msg = format!("experiment: {id} heat {heat}");
+    let _ = tokio::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir)
+        .output()
+        .await;
+    let output = tokio::process::Command::new("git")
+        .args(["commit", "-m", &msg, "--quiet", "--allow-empty"])
+        .current_dir(dir)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    tokio::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// Revert the last commit (preserves it in history, unlike reset).
+/// Uses `git revert HEAD --no-edit` so the failed experiment stays in `git log`.
+pub async fn git_revert_last() -> bool {
+    tokio::process::Command::new("git")
+        .args(["revert", "HEAD", "--no-edit", "--no-commit"])
+        .output()
+        .await
+        .ok()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Revert the last commit in a specific directory (worktree).
+pub async fn git_revert_last_in_dir(dir: &str) -> bool {
+    tokio::process::Command::new("git")
+        .args(["revert", "HEAD", "--no-edit", "--no-commit"])
+        .current_dir(dir)
+        .output()
+        .await
+        .ok()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Check if git experiments mode is enabled (opt-in for non-worktree).
+pub fn git_experiments_enabled() -> bool {
+    std::env::var("SLAG_GIT_EXPERIMENTS")
+        .ok()
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Check if the working tree is clean (no uncommitted changes).
+pub async fn git_is_clean() -> bool {
+    tokio::process::Command::new("git")
+        .args(["diff", "--quiet", "HEAD"])
+        .output()
+        .await
+        .ok()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
