@@ -1297,10 +1297,13 @@ const TRUNCATE_MAX_BYTES: usize = 4096;
 fn truncate_output(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
     if lines.len() <= TRUNCATE_HEAD_LINES + TRUNCATE_TAIL_LINES {
-        let result = output.to_string();
-        if result.len() <= TRUNCATE_MAX_BYTES {
-            return result;
+        if output.len() <= TRUNCATE_MAX_BYTES {
+            return output.to_string();
         }
+        // Few lines but huge content — just byte-cap
+        let mut result = output[..TRUNCATE_MAX_BYTES.saturating_sub(40)].to_string();
+        result.push_str("\n[...truncated to 4KB...]");
+        return result;
     }
 
     let head: Vec<&str> = lines.iter().take(TRUNCATE_HEAD_LINES).copied().collect();

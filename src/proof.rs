@@ -195,7 +195,7 @@ pub async fn git_experiment_commit_in_dir(id: &str, heat: u8, dir: &str) -> Opti
 /// Uses `git revert HEAD --no-edit` so the failed experiment stays in `git log`.
 pub async fn git_revert_last() -> bool {
     tokio::process::Command::new("git")
-        .args(["revert", "HEAD", "--no-edit", "--no-commit"])
+        .args(["revert", "HEAD", "--no-edit"])
         .output()
         .await
         .ok()
@@ -206,7 +206,7 @@ pub async fn git_revert_last() -> bool {
 /// Revert the last commit in a specific directory (worktree).
 pub async fn git_revert_last_in_dir(dir: &str) -> bool {
     tokio::process::Command::new("git")
-        .args(["revert", "HEAD", "--no-edit", "--no-commit"])
+        .args(["revert", "HEAD", "--no-edit"])
         .current_dir(dir)
         .output()
         .await

@@ -513,12 +513,12 @@ async fn parse_test_output(dir: &Path) -> (usize, usize) {
         let lower = line.to_lowercase();
         if lower.contains("passed") {
             if let Some(n) = extract_number_before(&lower, "passed") {
-                pass = n;
+                pass += n;
             }
         }
         if lower.contains("failed") && !lower.contains("0 failed") {
             if let Some(n) = extract_number_before(&lower, "failed") {
-                fail = n;
+                fail += n;
             }
         }
     }
