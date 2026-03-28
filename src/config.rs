@@ -342,7 +342,7 @@ fn smith_chain_from_override_or_detected(
             .as_deref()
             .map(is_claude_compatible_kimi_cli)
             .unwrap_or(false);
-        let mut chain = parse_smith_chain_tokens(&raw, kimi_native, kimi_claude_compat);
+        let mut chain = parse_smith_chain_tokens(raw, kimi_native, kimi_claude_compat);
         if chain.is_empty() {
             chain.push(base.to_string());
         }
