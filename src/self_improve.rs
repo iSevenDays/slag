@@ -332,8 +332,8 @@ async fn clone_upstream() -> Result<PathBuf, SlagError> {
             "fork",
             GH_REPO,
             "--clone",
-            "--remote",
-            &format!("--clone-dir={}", sandbox.to_str().unwrap()),
+            "--",
+            sandbox.to_str().unwrap(),
         ])
         .output()
         .await;
