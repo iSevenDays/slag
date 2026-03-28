@@ -1204,9 +1204,7 @@ async fn strike_ingot(
     let no_real_experiments = infra_retries > 0
         && smith_invoke_fail_count + protocol_cmd_fail_count == infra_retries;
 
-    if (no_real_experiments && smith_invoke_fail_count > 0)
-        || (infra_retries >= MAX_INFRA_RETRIES && smith_invoke_fail_count > 0)
-    {
+    if smith_invoke_fail_count > 0 && (no_real_experiments || infra_retries >= MAX_INFRA_RETRIES) {
         return Err(SlagError::SmithFailed(format!(
             "smith invocation failed on all {}/{} attempts; smith={}",
             smith_invoke_fail_count,
@@ -1215,9 +1213,7 @@ async fn strike_ingot(
         )));
     }
 
-    if (no_real_experiments && protocol_cmd_fail_count > 0)
-        || (infra_retries >= MAX_INFRA_RETRIES && protocol_cmd_fail_count > 0)
-    {
+    if protocol_cmd_fail_count > 0 && (no_real_experiments || infra_retries >= MAX_INFRA_RETRIES) {
         return Err(SlagError::SmithFailed(format!(
             "smith protocol failure for [{}]: missing/invalid CMD on {}/{} attempts; smith={}",
             active_ingot.id,
