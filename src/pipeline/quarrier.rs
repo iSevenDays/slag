@@ -164,7 +164,9 @@ pub fn load_phases() -> Option<Vec<Phase>> {
                 .unwrap_or_else(|| rest.to_string());
         } else if let Some(val) = line.strip_prefix("Criteria: ") {
             criteria = val.to_string();
-        } else if !line.starts_with('#') && !line.is_empty() && name.is_empty().not()
+        } else if !line.starts_with('#')
+            && !line.is_empty()
+            && name.is_empty().not()
             && desc.is_empty()
         {
             desc = line.to_string();

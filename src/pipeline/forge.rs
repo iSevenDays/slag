@@ -9,6 +9,7 @@ use crate::crucible::Crucible;
 use crate::error::SlagError;
 use crate::events;
 use crate::flux;
+use crate::ledger::{self, ExperimentRecord};
 use crate::prompt;
 use crate::proof;
 use crate::sexp::{Ingot, Status};
@@ -813,7 +814,14 @@ async fn strike_ingot(
         }
     }
 
+    let forge_cycle = std::env::var("SLAG_FORGE_CYCLE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+
     for heat in 1..=ingot.max {
+        let heat_start = Instant::now();
+
         // Check for identical consecutive failures from previous heat
         if let Some(ref slag_msg) = slag {
             let sig = failure_signature(slag_msg);
@@ -892,6 +900,20 @@ async fn strike_ingot(
                     spinner.finish_and_clear();
                 }
                 smith_invoke_fail_count = smith_invoke_fail_count.saturating_add(1);
+                ledger::append_record(&ExperimentRecord {
+                    ts: chrono::Utc::now().to_rfc3339(),
+                    ingot_id: active_ingot.id.clone(),
+                    cycle: forge_cycle,
+                    heat,
+                    smith_cmd: smith_hint.to_string(),
+                    status: "cracked".to_string(),
+                    duration_secs: heat_start.elapsed().as_secs(),
+                    proof_exit: -1,
+                    proof_cmd: active_ingot.proof.clone(),
+                    commit_hash: None,
+                    files_changed: 0,
+                    description: format!("Smith error: {e}"),
+                });
                 slag = Some(format!("Smith error: {e}"));
                 if !output_mode.is_quiet() {
                     if output_mode.is_verbose() {
@@ -911,6 +933,20 @@ async fn strike_ingot(
             Some(c) => c,
             None => {
                 protocol_cmd_fail_count = protocol_cmd_fail_count.saturating_add(1);
+                ledger::append_record(&ExperimentRecord {
+                    ts: chrono::Utc::now().to_rfc3339(),
+                    ingot_id: active_ingot.id.clone(),
+                    cycle: forge_cycle,
+                    heat,
+                    smith_cmd: smith_hint.to_string(),
+                    status: "cracked".to_string(),
+                    duration_secs: heat_start.elapsed().as_secs(),
+                    proof_exit: -1,
+                    proof_cmd: active_ingot.proof.clone(),
+                    commit_hash: None,
+                    files_changed: 0,
+                    description: "Smith output missing CMD: line".to_string(),
+                });
                 slag = Some("NO CMD: line in response".into());
                 if !output_mode.is_quiet() {
                     if output_mode.is_verbose() {
@@ -925,6 +961,20 @@ async fn strike_ingot(
 
         if is_protocol_placeholder_cmd(&cmd) {
             protocol_cmd_fail_count = protocol_cmd_fail_count.saturating_add(1);
+            ledger::append_record(&ExperimentRecord {
+                ts: chrono::Utc::now().to_rfc3339(),
+                ingot_id: active_ingot.id.clone(),
+                cycle: forge_cycle,
+                heat,
+                smith_cmd: smith_hint.to_string(),
+                status: "cracked".to_string(),
+                duration_secs: heat_start.elapsed().as_secs(),
+                proof_exit: -1,
+                proof_cmd: active_ingot.proof.clone(),
+                commit_hash: None,
+                files_changed: 0,
+                description: format!("Invalid CMD: {}", tui::truncate(&cmd, 80)),
+            });
             slag = Some(format!("INVALID CMD: {}", tui::truncate(&cmd, 80)));
             if !output_mode.is_quiet() {
                 if output_mode.is_verbose() {
@@ -964,6 +1014,23 @@ async fn strike_ingot(
                     proof::run_shell(&active_ingot.proof).await
                 };
                 if !proof_ok {
+                    ledger::append_record(&ExperimentRecord {
+                        ts: chrono::Utc::now().to_rfc3339(),
+                        ingot_id: active_ingot.id.clone(),
+                        cycle: forge_cycle,
+                        heat,
+                        smith_cmd: smith_hint.to_string(),
+                        status: "cracked".to_string(),
+                        duration_secs: heat_start.elapsed().as_secs(),
+                        proof_exit: 1,
+                        proof_cmd: active_ingot.proof.clone(),
+                        commit_hash: None,
+                        files_changed: ledger::git_files_changed(),
+                        description: format!(
+                            "Proof failed: {}",
+                            tui::truncate(&proof_output, 120)
+                        ),
+                    });
                     slag = Some(format!(
                         "Proof failed [{}]: {proof_output}",
                         active_ingot.proof
@@ -997,6 +1064,20 @@ async fn strike_ingot(
                 proof::git_commit(&active_ingot.id, &active_ingot.work).await;
             }
 
+            ledger::append_record(&ExperimentRecord {
+                ts: chrono::Utc::now().to_rfc3339(),
+                ingot_id: active_ingot.id.clone(),
+                cycle: forge_cycle,
+                heat,
+                smith_cmd: smith_hint.to_string(),
+                status: "forged".to_string(),
+                duration_secs: heat_start.elapsed().as_secs(),
+                proof_exit: 0,
+                proof_cmd: active_ingot.proof.clone(),
+                commit_hash: ledger::git_head_short(),
+                files_changed: ledger::git_files_changed(),
+                description: tui::truncate(&active_ingot.work, 120),
+            });
             append_ledger(&active_ingot, heat);
             return Ok(ForgeResult {
                 id: active_ingot.id.clone(),
@@ -1009,6 +1090,20 @@ async fn strike_ingot(
                 heat_used: heat,
             });
         } else {
+            ledger::append_record(&ExperimentRecord {
+                ts: chrono::Utc::now().to_rfc3339(),
+                ingot_id: active_ingot.id.clone(),
+                cycle: forge_cycle,
+                heat,
+                smith_cmd: smith_hint.to_string(),
+                status: "cracked".to_string(),
+                duration_secs: heat_start.elapsed().as_secs(),
+                proof_exit: 1,
+                proof_cmd: cmd.clone(),
+                commit_hash: None,
+                files_changed: ledger::git_files_changed(),
+                description: format!("CMD failed: {}", tui::truncate(&output, 120)),
+            });
             slag = Some(format!("CMD failed (exit 1): {output}"));
             if !output_mode.is_quiet() {
                 if output_mode.is_verbose() {
@@ -1478,7 +1573,7 @@ mod tests {
         let mut ingot = mk_ingot("i_bail", Status::Ore);
         ingot.max = 5;
         ingot.proof = "false".to_string(); // always fails
-        // Smith returns valid CMD that passes, but proof always fails → identical slag messages
+                                           // Smith returns valid CMD that passes, but proof always fails → identical slag messages
         let smith = MockSmith::new(vec![
             "CMD: true\n".to_string(),
             "CMD: true\n".to_string(),

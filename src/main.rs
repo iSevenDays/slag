@@ -7,6 +7,7 @@ mod crucible;
 mod error;
 mod events;
 mod flux;
+mod ledger;
 mod pipeline;
 mod progress;
 mod prompt;

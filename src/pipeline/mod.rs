@@ -42,7 +42,11 @@ pub async fn run(
     // Phase 0: Quarrier (decompose large commissions)
     let phases = if should_quarry(pipeline_config) {
         if let Some(existing) = quarrier::load_phases() {
-            tui::status_line("\u{2588}", tui::PURE, &format!("Resuming {} quarried phase(s)", existing.len()));
+            tui::status_line(
+                "\u{2588}",
+                tui::PURE,
+                &format!("Resuming {} quarried phase(s)", existing.len()),
+            );
             existing
         } else {
             let smith = ClaudeSmith::new(smith_config.base.clone());
@@ -183,7 +187,11 @@ fn scope_ore_for_phase(phase: &quarrier::Phase, phase_idx: usize, total: usize) 
             let lines: Vec<&str> = content.lines().collect();
             let start = lines.len().saturating_sub(15);
             let tail = lines[start..].join("\n");
-            if tail.trim().is_empty() { None } else { Some(tail) }
+            if tail.trim().is_empty() {
+                None
+            } else {
+                Some(tail)
+            }
         })
         .unwrap_or_else(|| "No prior work yet.".into());
 

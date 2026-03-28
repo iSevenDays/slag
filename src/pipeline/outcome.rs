@@ -731,7 +731,12 @@ fn sanitize_proof_cmd(cmd: &str) -> String {
     result.trim().to_string()
 }
 
-fn synthetic_repair_ingot(test_cmd: &str, comment: &str, requires_browser_test: bool, cycle: usize) -> Ingot {
+fn synthetic_repair_ingot(
+    test_cmd: &str,
+    comment: &str,
+    requires_browser_test: bool,
+    cycle: usize,
+) -> Ingot {
     let summary = if comment.trim().is_empty() {
         "Outcome validation failed".to_string()
     } else {
@@ -1160,10 +1165,7 @@ TEST: npm test
             sanitize_proof_cmd(r#"echo "STATUS:PASS" && npm test"#),
             "true && npm test"
         );
-        assert_eq!(
-            sanitize_proof_cmd(r#"echo "STATUS:PASS""#),
-            "true"
-        );
+        assert_eq!(sanitize_proof_cmd(r#"echo "STATUS:PASS""#), "true");
         assert_eq!(
             sanitize_proof_cmd(r#"echo "STATUS:FAIL" && echo "STATUS:PASS""#),
             "true"
