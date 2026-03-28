@@ -29,7 +29,7 @@ pub fn prepare_flux(ingot: &Ingot, slag: Option<&str>) -> String {
 /// Build flux using pre-loaded cache for blueprint and alloy.
 /// Crucible, ledger, and git diff are re-read per heat (they change).
 pub fn prepare_flux_cached(ingot: &Ingot, slag: Option<&str>, cache: &FluxCache) -> String {
-    let crucible = std::fs::read_to_string(CRUCIBLE).unwrap_or_else(|_| "Empty".into());
+    let crucible_compact = compact_crucible(ingot);
     let ledger = read_tail(LEDGER, 25);
     let git_diff = git_diff_stat();
 
@@ -45,26 +45,26 @@ pub fn prepare_flux_cached(ingot: &Ingot, slag: Option<&str>, cache: &FluxCache)
     };
 
     let mut flux = format!(
-        "=== FORGE ORDER ===\n\
+        "[FORGE]\n\
         [{id}] {work}\n\
         Grade: {grade}{complex_note}\n\
         Skill: {skill}{skill_note}\n\
         Heat: {heat}/{max}\n\
         Proof: {proof}\n\
         \n\
-        === BLUEPRINT ===\n\
+        [BLUEPRINT]\n\
         {blueprint}\n\
         \n\
-        === ALLOY RECIPES ===\n\
+        [ALLOY]\n\
         {alloy}\n\
         \n\
-        === CRUCIBLE STATE ===\n\
-        {crucible}\n\
+        [CRUCIBLE]\n\
+        {crucible_compact}\n\
         \n\
-        === RECENT LEDGER ===\n\
+        [LEDGER]\n\
         {ledger}\n\
         \n\
-        === GIT DIFF ===\n\
+        [DIFF]\n\
         {git_diff}\n\n",
         id = ingot.id,
         work = ingot.work,
@@ -606,6 +606,45 @@ pub fn prepare_outcome_recast_flux(
         - For web/simulation outcomes, TEST must emit a screenshot artifact under logs/ (use $SLAG_OUTCOME_SCREENSHOT path)\n\
         - For FAIL, emit 1-4 actionable repair ingots\n"
     )
+}
+
+/// Compact crucible: summary counts + current ingot + cracked ingots only.
+/// Saves ~500-2000 tokens per prompt vs including full PLAN.md.
+fn compact_crucible(current: &Ingot) -> String {
+    let Ok(crucible) = crate::crucible::Crucible::load(std::path::Path::new(CRUCIBLE)) else {
+        return "Empty".to_string();
+    };
+    let counts = crucible.counts();
+    let mut out = format!(
+        "{}t {}forged {}ore {}molten {}cracked\n",
+        counts.total, counts.forged, counts.ore, counts.molten, counts.cracked
+    );
+
+    // Current ingot full s-expression
+    if let Some(ingot) = crucible.get(&current.id) {
+        out.push_str(&format!(
+            "current: {}\n",
+            crate::sexp::writer::write_ingot(ingot)
+        ));
+    }
+
+    // Cracked ingots (context for what failed)
+    let cracked: Vec<_> = crucible
+        .ingots
+        .iter()
+        .filter(|i| i.status == crate::sexp::Status::Cracked)
+        .collect();
+    if !cracked.is_empty() {
+        out.push_str("cracked:\n");
+        for i in cracked.iter().take(5) {
+            out.push_str(&format!("  {}\n", crate::sexp::writer::write_ingot(i)));
+        }
+        if cracked.len() > 5 {
+            out.push_str(&format!("  ...+{} more\n", cracked.len() - 5));
+        }
+    }
+
+    out
 }
 
 fn read_tail(path: &str, lines: usize) -> String {
