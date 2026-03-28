@@ -8,6 +8,12 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.4.0
+
+- **`slag self-improve` — slag can now improve its own codebase.** New subcommand that runs the full forge pipeline against slag's own source in an isolated git worktree sandbox. Measures before/after metrics (test count, clippy warnings), keeps if improved, discards if not. Zero pollution — slag artifacts stay in the sandbox, only source changes merge to main.
+- **Targets:** `slag self-improve quality` (clippy), `slag self-improve tests` (coverage), `slag self-improve performance` (allocations), `slag self-improve tokens` (prompt sizes).
+- **First verified self-improvement:** slag fixed its own pre-existing clippy warning at `config.rs:345` (needless borrow) that persisted across 5+ releases. Surveyed → 3 ingots → forged all on heat 1 → outcome PASS → merged. `clippy: -2, tests: +0`.
+
 ## What's new in v1.3.39
 
 - **TOON tabular experiment ledger**: experiment log switched from JSONL to [TOON](https://github.com/toon-format/toon) (Token-Oriented Object Notation) tabular format. Field names written once in header, rows are compact comma-separated values. ~21% smaller on disk, larger savings when injected into smith prompts. Legacy JSONL files still readable (automatic fallback).
@@ -127,6 +133,7 @@ slag [OPTIONS] [COMMISSION]... [COMMAND]
 | `slag status` | Show crucible state (ingot counts and progress) |
 | `slag resume` | Resume an existing forge |
 | `slag update` | Self-update to latest release |
+| `slag self-improve [target]` | Run slag on its own codebase (quality\|tests\|performance\|tokens) |
 
 **Options:**
 

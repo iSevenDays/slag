@@ -41,7 +41,7 @@
         "name": "sliday",
         "url": "https://github.com/sliday"
       },
-      "softwareVersion": "1.3.39",
+      "softwareVersion": "1.4.0",
       "codeRepository": "https://github.com/sliday/slag",
       "programmingLanguage": ["Rust", "Bash"],
       "keywords": ["AI", "task orchestrator", "developer tools", "claude", "codex", "gemini", "kimi", "opencode"]
@@ -400,7 +400,81 @@ HISTORY(<span style="color:var(--slag-bright);">i3</span>)[2]{<span style="color
 
       <div is="separator"></div>
 
-      <!-- S10: FAQ -->
+      <!-- SELF-IMPROVEMENT -->
+      <section>
+        <h2>Self-Improvement</h2>
+        <p>Since v1.4.0, slag can improve its own codebase:</p>
+        <div class="install-hero" box="double">
+          <div class="cmd-line">
+            <code data-copy style="font-size: 1.1rem;">slag self-improve quality</code>
+          </div>
+          <p style="color: var(--foreground2); font-size: 0.85rem; margin-top: 0.5lh;">Runs the full forge pipeline against slag's own source in a worktree sandbox</p>
+        </div>
+
+        <h3 style="margin-top: 1.5lh;">How It Works</h3>
+<pre box="square" style="font-size: 0.85rem;">
+main repo (clean) ──┐
+                     │ git worktree add /tmp/slag-self-improve
+                     v
+/tmp/sandbox/           <span style="color:var(--slag-cold);">&larr; slag runs HERE</span>
+  ├── src/*.rs            (edited by smith)
+  ├── PLAN.md             (artifact &mdash; stays in sandbox)
+  ├── logs/               (artifact &mdash; stays in sandbox)
+                     │
+                     │ if <span style="color:var(--slag-pure);">improved</span> &rarr; merge source changes to main
+                     │ if <span style="color:var(--slag-warm);">not</span> &rarr; discard sandbox
+                     v
+main repo (clean, possibly improved)
+</pre>
+
+        <h3 style="margin-top: 1.5lh;">Targets</h3>
+        <table class="field-table" style="margin-top: 0.5lh;">
+          <thead>
+            <tr>
+              <th>Target</th>
+              <th>Measures</th>
+              <th>Commission</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>quality</code></td>
+              <td>clippy warnings</td>
+              <td>Fix clippy warnings in pipeline and flux modules</td>
+            </tr>
+            <tr>
+              <td><code>tests</code></td>
+              <td>test count</td>
+              <td>Add unit tests for untested functions</td>
+            </tr>
+            <tr>
+              <td><code>performance</code></td>
+              <td>allocations</td>
+              <td>Reduce unnecessary allocations in forge loop</td>
+            </tr>
+            <tr>
+              <td><code>tokens</code></td>
+              <td>prompt size</td>
+              <td>Compress prompts in flux.rs</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: 1.5lh;">First Self-Improvement</h3>
+        <p>slag's first verified self-improvement fixed a clippy warning at <code>config.rs:345</code> that persisted across 5+ releases:</p>
+<pre box="square" style="font-size: 0.85rem;">
+<span style="color:var(--slag-cold);">baseline:</span> tests: 138 pass / 0 fail, clippy: 2 warnings
+<span style="color:var(--slag-pure);">after:</span>    tests: 138 pass / 0 fail, clippy: 0 warnings
+<span style="color:var(--slag-bright);">delta:</span>    tests: +0, clippy: <span style="color:var(--slag-pure);">-2</span>
+
+<span style="color:var(--slag-pure);">&gt;&gt;</span> Self-improvement accepted (tests: +0, clippy: -2)
+</pre>
+        <p style="margin-top: 1lh;">The loop: <span style="color:var(--foreground1);">old binary orchestrates &rarr; smith edits src/*.rs &rarr; cargo test verifies &rarr; metrics compared &rarr; merge if improved</span>. Zero pollution &mdash; slag artifacts stay in the sandbox, only source changes reach main.</p>
+      </section>
+
+      <div is="separator"></div>
+
+      <!-- FAQ -->
       <!-- (section numbers shifted due to new Experiment Loop + Inspiration sections) -->
       <section class="decisions">
         <h2>FAQ</h2>
