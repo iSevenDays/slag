@@ -91,6 +91,13 @@ pub enum Command {
 
     /// Self-update to latest release
     Update,
+
+    /// Run slag on its own codebase to improve code quality
+    SelfImprove {
+        /// Improvement target (quality|tests|performance|tokens)
+        #[arg(default_value = "quality")]
+        target: String,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]

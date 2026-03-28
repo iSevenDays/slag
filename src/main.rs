@@ -12,6 +12,7 @@ mod pipeline;
 mod progress;
 mod prompt;
 mod proof;
+mod self_improve;
 mod sexp;
 mod smith;
 mod tui;
@@ -74,6 +75,10 @@ async fn main() {
         Some(Command::Resume) => {
             let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
             pipeline::run(None, &smith_config, &pipeline_config).await
+        }
+        Some(Command::SelfImprove { target }) => {
+            let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
+            self_improve::run(&target, &smith_config, &pipeline_config).await
         }
         None => {
             let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
