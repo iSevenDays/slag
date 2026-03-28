@@ -78,10 +78,48 @@ pub async fn run(
         ));
     }
 
+    // Check for existing self-improve PRs
+    let existing_prs = list_existing_prs().await;
+    let continue_branch = if !existing_prs.is_empty() {
+        tui::status_line("0", tui::COLD, "Existing self-improve PRs found:");
+        for (i, pr) in existing_prs.iter().enumerate() {
+            println!("  \x1b[90m{}. {} — {}\x1b[0m", i + 1, pr.number, pr.title);
+        }
+        print!(
+            "  \x1b[38;5;220m?\x1b[0m [N]ew PR / [1-{}] continue existing / [Q]uit: ",
+            existing_prs.len()
+        );
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let choice = crate::prompt::read_line_timeout(30)
+            .unwrap_or_else(|| "n".to_string());
+        let choice = choice.trim().to_lowercase();
+        if choice == "q" || choice == "quit" {
+            return Ok(());
+        }
+        if let Ok(idx) = choice.parse::<usize>() {
+            if idx >= 1 && idx <= existing_prs.len() {
+                Some(existing_prs[idx - 1].branch.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Clone slag from GitHub
     tui::status_line("1", tui::COLD, "Cloning slag from GitHub...");
     let sandbox = clone_upstream().await?;
     println!("  \x1b[90msandbox: {}\x1b[0m", sandbox.display());
+
+    // If continuing an existing PR, checkout that branch
+    if let Some(ref branch) = continue_branch {
+        tui::status_line("1b", tui::COLD, &format!("Checking out {branch}..."));
+        git_cmd(&sandbox, &["fetch", "origin", branch]).await;
+        git_cmd(&sandbox, &["checkout", "-b", branch, &format!("origin/{branch}")]).await;
+    }
 
     // Measure baseline
     tui::status_line("2", tui::COLD, "Measuring baseline...");
@@ -107,9 +145,14 @@ pub async fn run(
     };
     tui::status_line("3", tui::WARM, &format!("Commission: {display_target}"));
 
-    // Create branch for the PR
-    let branch_name = make_branch_name(target);
-    git_cmd(&sandbox, &["checkout", "-b", &branch_name]).await;
+    // Create or reuse branch for the PR
+    let branch_name = if let Some(ref branch) = continue_branch {
+        branch.clone()
+    } else {
+        let name = make_branch_name(target);
+        git_cmd(&sandbox, &["checkout", "-b", &name]).await;
+        name
+    };
 
     // Run pipeline in sandbox
     tui::status_line("4", tui::HOT, "Forging in sandbox...");
@@ -159,9 +202,15 @@ pub async fn run(
     )
     .await;
 
-    // Push and create PR
-    tui::status_line("7", tui::PURE, "Creating pull request...");
-    let pr_url = create_pr(&sandbox, &branch_name, target, &baseline, &after).await?;
+    // Push and create/update PR
+    let pr_url = if continue_branch.is_some() {
+        tui::status_line("7", tui::PURE, "Pushing to existing PR...");
+        git_cmd(&sandbox, &["push", "origin", &branch_name]).await;
+        format!("(pushed to existing branch {branch_name})")
+    } else {
+        tui::status_line("7", tui::PURE, "Creating pull request...");
+        create_pr(&sandbox, &branch_name, target, &baseline, &after).await?
+    };
 
     cleanup_sandbox(&sandbox).await;
 
@@ -218,6 +267,56 @@ fn make_branch_name(target: &str) -> String {
     let slug = slug.trim_end_matches('-');
     let ts = chrono::Utc::now().timestamp();
     format!("self-improve/{slug}-{ts}")
+}
+
+// --- PR discovery ---
+
+struct ExistingPr {
+    number: String,
+    title: String,
+    branch: String,
+}
+
+async fn list_existing_prs() -> Vec<ExistingPr> {
+    let output = tokio::process::Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--repo",
+            GH_REPO,
+            "--state",
+            "open",
+            "--search",
+            "self-improve in:title",
+            "--json",
+            "number,title,headRefName",
+        ])
+        .output()
+        .await;
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Parse JSON array: [{"number":142,"title":"...","headRefName":"..."},...]
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else {
+        return Vec::new();
+    };
+
+    items
+        .iter()
+        .filter_map(|item| {
+            Some(ExistingPr {
+                number: format!("#{}", item.get("number")?.as_u64()?),
+                title: item.get("title")?.as_str()?.to_string(),
+                branch: item.get("headRefName")?.as_str()?.to_string(),
+            })
+        })
+        .collect()
 }
 
 // --- Sandbox lifecycle ---
