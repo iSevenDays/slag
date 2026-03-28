@@ -41,7 +41,7 @@
         "name": "sliday",
         "url": "https://github.com/sliday"
       },
-      "softwareVersion": "1.3.33",
+      "softwareVersion": "1.3.37",
       "codeRepository": "https://github.com/sliday/slag",
       "programmingLanguage": ["Rust", "Bash"],
       "keywords": ["AI", "task orchestrator", "developer tools", "claude", "codex", "gemini", "kimi", "opencode"]
@@ -197,17 +197,20 @@ EOF</code>
     |  grade >= 3   --> plan mode
     |  default      --> base tools
     v
- <span style="color:var(--slag-hot);">STRIKE</span> (smith invocation)
+ <span style="color:var(--slag-hot);">STRIKE</span> (smith invocation, time-budgeted)
     |
     v
- <span style="color:var(--slag-cold);">CMD</span> (extract & run shell command)
+ <span style="color:var(--slag-cold);">CMD</span> (extract shell command)
     |
     v
- <span style="color:var(--slag-bright);">PROOF</span> (run :proof shell command)
+ <span style="color:var(--slag-bright);">GIT COMMIT</span> (experiment: {id} heat {n})
     |
-    +----- pass ----> <span style="color:var(--slag-pure);">:forged</span>  + git commit
+    v
+ <span style="color:var(--slag-cold);">RUN CMD</span> + <span style="color:var(--slag-bright);">PROOF</span> (verify)
     |
-    +----- fail ----> :heat++ retry with slag feedback
+    +----- pass ----> <span style="color:var(--slag-pure);">:forged</span>  (keep commit)
+    |
+    +----- fail ----> <span style="color:var(--slag-warm);">git revert</span> + :heat++ retry with experiment history
     |
     +----- max -----> <span style="color:var(--slag-warm);">RE-SMELT</span> (analyze failure, :smelt 0→1)
                          |
@@ -309,7 +312,106 @@ EOF</code>
 
       <div is="separator"></div>
 
-      <!-- S8: FAQ -->
+      <!-- S8: EXPERIMENT LOOP -->
+      <section>
+        <h2>Experiment Loop</h2>
+        <p>Since v1.3.37, slag's forge loop follows an experiment-driven pattern inspired by autonomous research systems:</p>
+        <div class="quickstart-box" box="square">
+          <div class="cmd-line">
+            <span class="cmd-comment"># the forge heat loop (per ingot)</span>
+            <code>1. Prepare flux (prompt with blueprint + experiment history)
+2. Invoke smith (time-budgeted via :budget)
+3. Extract CMD from response
+4. Git commit BEFORE verification (experiment: {id} heat {n})
+5. Run CMD + proof verification
+6. If pass  &rarr; keep commit, record "forged" in ledger
+7. If fail  &rarr; git revert, record "reverted" in ledger
+8. If infra &rarr; don't consume heat, retry (up to 6 free retries)
+9. Repeat with structured experiment history in next prompt</code>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 1.5lh;">Structured Experiment Ledger</h3>
+        <p>Every heat&mdash;success and failure&mdash;is recorded as a JSONL line in <code>logs/experiments.jsonl</code>:</p>
+        <div class="quickstart-box" box="square">
+          <div class="cmd-line">
+            <code>{"ts":"2026-03-28T14:21:03Z","ingot_id":"i1","cycle":1,"heat":1,
+ "smith_cmd":"claude -p ...","status":"forged","duration_secs":19,
+ "proof_exit":0,"proof_cmd":"node --check server.js",
+ "commit_hash":"5f6a2d7","files_changed":3,
+ "description":"Create HTTP server"}</code>
+          </div>
+        </div>
+        <p style="margin-top: 1lh;">On retry, the smith receives structured experiment history instead of just a raw "CRACKED" message:</p>
+        <div class="quickstart-box" box="square">
+          <div class="cmd-line">
+            <code>=== EXPERIMENT HISTORY (i3) ===
+Heat 1: reverted (47s) &mdash; "TypeError: foo is not a function" [a1b2c3d]
+Heat 2: reverted (23s) &mdash; "Module not found: bar" [e4f5g6h]
+Heat 3: (current)
+===</code>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 1.5lh;">Git as Memory</h3>
+        <p>Failed experiments stay in git history via <code>git revert</code> (not <code>git reset</code>). The smith can see what was tried by reading the log. Enable with <code>SLAG_GIT_EXPERIMENTS=1</code> or use <code>--worktree</code> mode (always active there).</p>
+
+        <h3 style="margin-top: 1.5lh;">Crash Recovery Protocol</h3>
+        <p>Not all failures are equal. Infrastructure failures (smith timeout, rate limit, missing CMD) get free retries without consuming heats:</p>
+        <table class="field-table" style="margin-top: 0.5lh;">
+          <thead>
+            <tr>
+              <th>Failure Type</th>
+              <th>Action</th>
+              <th>Consumes Heat?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Proof fails (exit != 0)</td>
+              <td>Revert commit, log, retry</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Smith protocol error (no CMD)</td>
+              <td>Don't commit, retry</td>
+              <td>No (up to 6 free)</td>
+            </tr>
+            <tr>
+              <td>Smith timeout / rate limit</td>
+              <td>Failover to next smith in chain</td>
+              <td>No (up to 6 free)</td>
+            </tr>
+            <tr>
+              <td>Budget exceeded</td>
+              <td>Timeout, continue next heat</td>
+              <td>Yes</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <div is="separator"></div>
+
+      <!-- S9: INSPIRATION -->
+      <section>
+        <h2>Inspiration</h2>
+        <p>The experiment loop in v1.3.37 was inspired by <a href="https://github.com/karpathy/autoresearch" target="_blank" rel="noopener noreferrer">autoresearch</a> by Andrej Karpathy&mdash;a framework that gives an AI agent a training setup and lets it experiment autonomously overnight: modify code, train for 5 minutes, evaluate metrics, keep or discard, repeat ~100 times.</p>
+        <p style="margin-top: 1lh;">Key ideas borrowed and adapted for general-purpose task orchestration:</p>
+        <ul style="margin-top: 0.5lh; color: var(--foreground1);">
+          <li><strong>Git as memory</strong> &mdash; commit before verify, revert on failure. Failed experiments stay in history for the next attempt to learn from. (via <a href="https://github.com/uditgoenka/autoresearch" target="_blank" rel="noopener noreferrer">uditgoenka's fork</a>)</li>
+          <li><strong>Structured experiment log</strong> &mdash; every attempt recorded as JSONL with timing, status, and commit hash. Not just successes&mdash;failures are equally valuable data.</li>
+          <li><strong>History-informed iteration</strong> &mdash; each retry sees what was tried and what failed, not just "try again". The smith gets a complete experiment history.</li>
+          <li><strong>Time-budgeted execution</strong> &mdash; fixed wall-clock budget per ingot forces creative solutions within constraints, matching autoresearch's 5-minute training cap.</li>
+          <li><strong>Infrastructure vs experiment failures</strong> &mdash; only real experiments consume retry heats. Protocol errors and timeouts get free retries.</li>
+        </ul>
+        <p style="margin-top: 1lh;">Also influenced by the <a href="https://github.com/trevin-creator/autoresearch-mlx" target="_blank" rel="noopener noreferrer">MLX port</a> which demonstrated hardware-aware experiment optimization on Apple Silicon.</p>
+      </section>
+
+      <div is="separator"></div>
+
+      <!-- S10: FAQ -->
+      <!-- (section numbers shifted due to new Experiment Loop + Inspiration sections) -->
       <section class="decisions">
         <h2>FAQ</h2>
 
@@ -397,6 +499,11 @@ EOF</code>
               <td><code>:smelt</code></td>
               <td>0-2+</td>
               <td>Re-smelt/reconsider count (0 = never, 1 = re-smelted, 2 = reconsidered)</td>
+            </tr>
+            <tr>
+              <td><code>:budget</code></td>
+              <td>seconds (optional)</td>
+              <td>Per-ingot wall-clock time limit for smith invocation</td>
             </tr>
             <tr>
               <td><code>:proof</code></td>

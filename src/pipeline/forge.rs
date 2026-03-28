@@ -1102,9 +1102,12 @@ async fn strike_ingot(
                             proof::git_revert_last().await;
                         }
                     }
-                    slag = Some(format!(
-                        "Proof failed [{}]: {proof_output}",
-                        active_ingot.proof
+                    slag = Some(format_slag_message(
+                        "proof_failure",
+                        1,
+                        &active_ingot.proof,
+                        &proof_output,
+                        ledger::git_files_changed(),
                     ));
                     if !output_mode.is_quiet() {
                         if output_mode.is_verbose() {
@@ -1183,7 +1186,13 @@ async fn strike_ingot(
                 files_changed: ledger::git_files_changed(),
                 description: format!("CMD failed: {}", tui::truncate(&output, 120)),
             });
-            slag = Some(format!("CMD failed (exit 1): {output}"));
+            slag = Some(format_slag_message(
+                "cmd_failure",
+                1,
+                &cmd,
+                &output,
+                ledger::git_files_changed(),
+            ));
             if !output_mode.is_quiet() {
                 if output_mode.is_verbose() {
                     println!("\x1b[31m✗\x1b[0m");
@@ -1259,13 +1268,84 @@ fn failure_signature(output: &str) -> String {
     output
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with("=== HEAT")
+                && !l.starts_with("Type:")
+                && !l.starts_with("Exit:")
+                && !l.starts_with("CMD:")
+                && !l.starts_with("Files changed:")
+                && !l.starts_with("===")
+        })
         .take(3)
         .collect::<Vec<_>>()
         .join("\n")
         .chars()
         .take(200)
         .collect()
+}
+
+const TRUNCATE_HEAD_LINES: usize = 5;
+const TRUNCATE_TAIL_LINES: usize = 30;
+const TRUNCATE_MAX_BYTES: usize = 4096;
+
+/// Smart output truncation: keep first N + last M lines, cap total bytes.
+/// Inspired by badlogic/pi-mono coding-agent's bash tool truncation strategy.
+fn truncate_output(output: &str) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    if lines.len() <= TRUNCATE_HEAD_LINES + TRUNCATE_TAIL_LINES {
+        let result = output.to_string();
+        if result.len() <= TRUNCATE_MAX_BYTES {
+            return result;
+        }
+    }
+
+    let head: Vec<&str> = lines.iter().take(TRUNCATE_HEAD_LINES).copied().collect();
+    let tail: Vec<&str> = lines
+        .iter()
+        .rev()
+        .take(TRUNCATE_TAIL_LINES)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let omitted = lines.len().saturating_sub(TRUNCATE_HEAD_LINES + TRUNCATE_TAIL_LINES);
+
+    let mut result = head.join("\n");
+    if omitted > 0 {
+        result.push_str(&format!("\n[...truncated {omitted} lines, full output in logs/...]\n"));
+    }
+    result.push_str(&tail.join("\n"));
+
+    // Hard byte cap
+    if result.len() > TRUNCATE_MAX_BYTES {
+        result.truncate(TRUNCATE_MAX_BYTES.saturating_sub(40));
+        result.push_str("\n[...truncated to 4KB...]");
+    }
+
+    result
+}
+
+/// Structured failure message for smith retry context.
+/// Replaces raw "CMD failed (exit 1): {full_output}" with parseable fields.
+fn format_slag_message(
+    failure_type: &str,
+    exit_code: i32,
+    cmd: &str,
+    output: &str,
+    files_changed: usize,
+) -> String {
+    let truncated = truncate_output(output);
+    format!(
+        "=== HEAT FAILED ===\n\
+        Type: {failure_type}\n\
+        Exit: {exit_code}\n\
+        CMD: {cmd}\n\
+        Files changed: {files_changed}\n\
+        Error output:\n{truncated}\n\
+        ==="
+    )
 }
 
 fn is_protocol_placeholder_cmd(cmd: &str) -> bool {
