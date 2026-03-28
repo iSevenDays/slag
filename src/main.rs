@@ -78,7 +78,8 @@ async fn main() {
         }
         Some(Command::SelfImprove { target }) => {
             let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
-            self_improve::run(&target, &smith_config, &pipeline_config).await
+            let target_text = target.join(" ");
+            self_improve::run(&target_text, &smith_config, &pipeline_config).await
         }
         None => {
             let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);

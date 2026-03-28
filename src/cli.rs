@@ -94,9 +94,9 @@ pub enum Command {
 
     /// Run slag on its own codebase to improve code quality
     SelfImprove {
-        /// Improvement target (quality|tests|performance|tokens)
-        #[arg(default_value = "quality")]
-        target: String,
+        /// Improvement target: quality|tests|performance|tokens or freeform text
+        #[arg(trailing_var_arg = true, default_values_t = vec!["quality".to_string()])]
+        target: Vec<String>,
     },
 }
 
