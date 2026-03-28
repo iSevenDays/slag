@@ -8,6 +8,12 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.4.1
+
+- **Fix: `truncate_output` byte cap for short-but-huge output.** When output had few lines but exceeded 4KB, the early return path skipped the byte cap and duplicated lines. Now applies byte cap directly.
+- **Fix: `git_revert_last` now creates proper revert commits.** Removed `--no-commit` flag that was leaving dirty tree state, bleeding staged changes into the next heat's experiment commit.
+- **Fix: `parse_test_output` accumulates across crates.** Multi-crate `cargo test --all` output now sums pass/fail counts instead of only keeping the last crate's numbers.
+
 ## What's new in v1.4.0
 
 - **`slag self-improve` — slag can improve its own codebase and submit PRs.** Clones from GitHub, forges improvements in `/tmp/` sandbox, measures before/after metrics (tests, clippy), and creates a PR via `gh` if improved. Anyone can contribute improvements without touching the source repo directly.
