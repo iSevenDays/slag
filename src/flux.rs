@@ -2,11 +2,33 @@ use crate::config::{ALLOY_FILE, BLUEPRINT, CRUCIBLE, HIGH_GRADE, LEDGER};
 use crate::ledger;
 use crate::sexp::Ingot;
 
+/// Cached invariant flux components.
+/// Blueprint and alloy don't change between heats — read once, reuse.
+/// Inspired by badlogic/pi-mono's cached session state pattern.
+pub struct FluxCache {
+    pub blueprint: String,
+    pub alloy: String,
+}
+
+impl FluxCache {
+    pub fn load() -> Self {
+        Self {
+            blueprint: std::fs::read_to_string(BLUEPRINT).unwrap_or_else(|_| "None".into()),
+            alloy: std::fs::read_to_string(ALLOY_FILE).unwrap_or_else(|_| "None yet".into()),
+        }
+    }
+}
+
 /// Build the prompt (flux) for striking an ingot.
 /// Includes blueprint, alloy recipes, crucible state, ledger, git diff.
 pub fn prepare_flux(ingot: &Ingot, slag: Option<&str>) -> String {
-    let blueprint = std::fs::read_to_string(BLUEPRINT).unwrap_or_else(|_| "None".into());
-    let alloy = std::fs::read_to_string(ALLOY_FILE).unwrap_or_else(|_| "None yet".into());
+    let cache = FluxCache::load();
+    prepare_flux_cached(ingot, slag, &cache)
+}
+
+/// Build flux using pre-loaded cache for blueprint and alloy.
+/// Crucible, ledger, and git diff are re-read per heat (they change).
+pub fn prepare_flux_cached(ingot: &Ingot, slag: Option<&str>, cache: &FluxCache) -> String {
     let crucible = std::fs::read_to_string(CRUCIBLE).unwrap_or_else(|_| "Empty".into());
     let ledger = read_tail(LEDGER, 25);
     let git_diff = git_diff_stat();
@@ -51,6 +73,8 @@ pub fn prepare_flux(ingot: &Ingot, slag: Option<&str>) -> String {
         heat = ingot.heat,
         max = ingot.max,
         proof = ingot.proof,
+        blueprint = cache.blueprint,
+        alloy = cache.alloy,
     );
 
     if let Some(slag_msg) = slag {

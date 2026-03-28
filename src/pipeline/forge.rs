@@ -828,6 +828,9 @@ async fn strike_ingot(
             .filter(|v| *v > 0)
     });
 
+    // Cache invariant flux components (blueprint, alloy) — read once, reuse across heats.
+    let flux_cache = flux::FluxCache::load();
+
     let mut heat: u8 = 0;
     let mut infra_retries: u8 = 0;
     const MAX_INFRA_RETRIES: u8 = 6; // cap free retries for infra failures
@@ -882,7 +885,7 @@ async fn strike_ingot(
             );
         }
 
-        let flux_text = flux::prepare_flux(&active_ingot, slag.as_deref());
+        let flux_text = flux::prepare_flux_cached(&active_ingot, slag.as_deref(), &flux_cache);
         log_to_file(&format!("FLUX_{}_{heat}", active_ingot.id), &flux_text);
 
         let spinner = if output_mode.is_quiet() {
