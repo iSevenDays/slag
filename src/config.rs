@@ -8,7 +8,8 @@ pub const ALLOY_FILE: &str = "AGENTS.md";
 pub const LEDGER: &str = "PROGRESS.md";
 pub const PHASES_FILE: &str = "PHASES.md";
 pub const LOG_DIR: &str = "logs";
-pub const EXPERIMENT_LOG: &str = "logs/experiments.jsonl";
+pub const EXPERIMENT_LOG: &str = "logs/experiments.toon";
+pub const EXPERIMENT_LOG_JSONL: &str = "logs/experiments.jsonl";
 pub const DEFAULT_INGOT_BUDGET_SECS: u64 = 300;
 
 /// Behavior constants
