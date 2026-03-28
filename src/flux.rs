@@ -1,4 +1,5 @@
 use crate::config::{ALLOY_FILE, BLUEPRINT, CRUCIBLE, HIGH_GRADE, LEDGER};
+use crate::ledger;
 use crate::sexp::Ingot;
 
 /// Build the prompt (flux) for striking an ingot.
@@ -53,6 +54,11 @@ pub fn prepare_flux(ingot: &Ingot, slag: Option<&str>) -> String {
     );
 
     if let Some(slag_msg) = slag {
+        // Inject structured experiment history from the ledger
+        if let Some(history) = ledger::format_ingot_history(&ingot.id) {
+            flux.push_str(&history);
+            flux.push('\n');
+        }
         flux.push_str(&format!(
             "!!! CRACKED - PREVIOUS ATTEMPT FAILED !!!\n{slag_msg}\n!!! ANALYZE AND FIX !!!\n"
         ));

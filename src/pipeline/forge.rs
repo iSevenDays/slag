@@ -1099,7 +1099,7 @@ async fn strike_ingot(
                 duration_secs: heat_start.elapsed().as_secs(),
                 proof_exit: 0,
                 proof_cmd: active_ingot.proof.clone(),
-                commit_hash: experiment_hash.clone().or_else(|| ledger::git_head_short()),
+                commit_hash: experiment_hash.clone().or_else(ledger::git_head_short),
                 files_changed: ledger::git_files_changed(),
                 description: tui::truncate(&active_ingot.work, 120),
             });
