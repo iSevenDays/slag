@@ -370,10 +370,21 @@ async fn clone_upstream() -> Result<PathBuf, SlagError> {
 }
 
 async fn strip_artifacts(sandbox: &Path) {
+    // Restore upstream versions of artifacts that existed before forge.
+    // Use origin/main as the clean baseline — don't delete files that exist upstream.
     for artifact in SLAG_ARTIFACTS {
-        let path = sandbox.join(artifact);
-        let _ = std::fs::remove_file(&path);
+        // Try restoring from origin/main; if artifact didn't exist upstream, remove it
+        let restore = tokio::process::Command::new("git")
+            .args(["checkout", "origin/main", "--", artifact])
+            .current_dir(sandbox)
+            .output()
+            .await;
+        let restored = restore.map(|o| o.status.success()).unwrap_or(false);
+        if !restored {
+            let _ = std::fs::remove_file(sandbox.join(artifact));
+        }
     }
+    // Remove logs/ created by forge (not in upstream)
     let _ = std::fs::remove_dir_all(sandbox.join("logs"));
     git_cmd(sandbox, &["add", "-A"]).await;
 }
