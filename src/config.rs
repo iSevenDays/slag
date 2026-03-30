@@ -13,7 +13,7 @@ pub const EXPERIMENT_LOG_JSONL: &str = "logs/experiments.jsonl";
 pub const DEFAULT_INGOT_BUDGET_SECS: u64 = 300;
 
 /// Behavior constants
-pub const MAX_ANVILS: usize = 3;
+pub const MAX_ANVILS: usize = 6;
 pub const HIGH_GRADE: u8 = 3;
 pub const MAX_ITERATE: usize = 3;
 pub const DEFAULT_PROMPT_TIMEOUT_SECS: u64 = 45;

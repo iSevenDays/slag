@@ -8,6 +8,12 @@ A task orchestrator for AI-powered development. Give it a product requirement, a
 
 ![slag-promo](https://github.com/user-attachments/assets/d12def06-6eab-4236-9634-bbbd09be6683)
 
+## What's new in v1.5.0
+
+- **Default parallel anvils raised from 3 to 6.** Better utilization for Claude Max and high-rate-limit API tiers. Override with `--anvils N`.
+- **Stall detection with proactive cancellation.** If an anvil exceeds 2x the average sibling completion time (floor 10 min), it is aborted and the ingot requeued as ore. Configurable via `SLAG_STALL_MULTIPLIER` (default 2.0) and `SLAG_STALL_FLOOR_SECS` (default 600). Works in all modes, not just verbose.
+- **Parallel proof re-evaluation.** Post-forge proof checks for cracked ingots now run concurrently via JoinSet instead of sequentially. With 6 cracked ingots this reduces re-eval from ~12 min worst case to ~2 min.
+
 ## What's new in v1.4.1
 
 - **Fix: `truncate_output` byte cap for short-but-huge output.** When output had few lines but exceeded 4KB, the early return path skipped the byte cap and duplicated lines. Now applies byte cap directly.

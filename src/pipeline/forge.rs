@@ -159,10 +159,12 @@ pub async fn run(
 
             // Spawn parallel tasks
             let mut set = tokio::task::JoinSet::new();
+            let mut abort_handles: HashMap<String, tokio::task::AbortHandle> = HashMap::new();
             for ingot in ingot_snapshots {
                 let smith_chain = config.select_chain(ingot.skill.as_str(), ingot.grade);
                 let worktree_mode = use_worktree;
-                set.spawn(async move {
+                let ingot_id = ingot.id.clone();
+                let handle = set.spawn(async move {
                     let result = strike_ingot_with_chain(
                         &ingot,
                         &smith_chain,
@@ -172,6 +174,7 @@ pub async fn run(
                     .await;
                     (ingot.id.clone(), result)
                 });
+                abort_handles.insert(ingot_id, handle);
             }
 
             let heartbeat_secs = verbose_heartbeat_secs();
@@ -181,25 +184,55 @@ pub async fn run(
                 .collect();
             let mut last_completion = Instant::now();
             let mut smith_fatal_failures = 0usize;
+            let mut completed_durations: Vec<Duration> = Vec::new();
+            let stall_multiplier: f64 = std::env::var("SLAG_STALL_MULTIPLIER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2.0);
+            let stall_floor_secs: u64 = std::env::var("SLAG_STALL_FLOOR_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(600);
+
+            let mut stall_requeue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
 
             // Collect results and update crucible on main thread
             loop {
-                let next = if pipeline_config.verbose {
-                    match tokio::time::timeout(Duration::from_secs(heartbeat_secs), set.join_next())
-                        .await
-                    {
-                        Ok(result) => result,
-                        Err(_) => {
+                let next = match tokio::time::timeout(Duration::from_secs(heartbeat_secs), set.join_next())
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        if pipeline_config.verbose {
                             log_parallel_heartbeat(
                                 &pending_started,
                                 last_completion,
                                 heartbeat_secs,
                             );
-                            continue;
                         }
+                        // Stall detection: abort anvils exceeding threshold
+                        if completed_durations.len() >= 2 {
+                            let avg_secs_f64 = completed_durations.iter().map(|d| d.as_secs_f64()).sum::<f64>()
+                                / completed_durations.len() as f64;
+                            let threshold_secs = ((avg_secs_f64 * stall_multiplier) as u64).max(stall_floor_secs);
+                            let stalled: Vec<String> = pending_started
+                                .iter()
+                                .filter(|(_, started)| started.elapsed().as_secs() > threshold_secs)
+                                .map(|(id, _)| id.clone())
+                                .collect();
+                            for id in stalled {
+                                if let Some(handle) = abort_handles.remove(&id) {
+                                    handle.abort();
+                                    stall_requeue.push_back(id.clone());
+                                    eprintln!(
+                                        "  \x1b[38;5;208m⏱\x1b[0m [{}] stalled (>{threshold_secs}s), aborting and requeueing",
+                                        id
+                                    );
+                                }
+                            }
+                        }
+                        continue;
                     }
-                } else {
-                    set.join_next().await
                 };
 
                 let Some(result) = next else {
@@ -209,7 +242,10 @@ pub async fn run(
                 let mut crucible = Crucible::load(Path::new(CRUCIBLE))?;
                 match result {
                     Ok((id, Ok(forge_result))) => {
-                        pending_started.remove(&id);
+                        abort_handles.remove(&id);
+                        if let Some(started) = pending_started.remove(&id) {
+                            completed_durations.push(started.elapsed());
+                        }
                         last_completion = Instant::now();
                         let heat_used = forge_result.heat_used;
                         let max_heat = crucible
@@ -228,6 +264,7 @@ pub async fn run(
                         );
                     }
                     Ok((id, Err(SlagError::IngotCracked(_, heat_used)))) => {
+                        abort_handles.remove(&id);
                         pending_started.remove(&id);
                         last_completion = Instant::now();
                         // Try resmelt
@@ -258,6 +295,7 @@ pub async fn run(
                         }
                     }
                     Ok((id, Err(e))) => {
+                        abort_handles.remove(&id);
                         pending_started.remove(&id);
                         last_completion = Instant::now();
                         if is_smith_failover_candidate(&e) {
@@ -269,6 +307,14 @@ pub async fn run(
                         );
                         crucible.set_status(&id, Status::Cracked);
                         crucible.save()?;
+                    }
+                    Err(e) if e.is_cancelled() => {
+                        if let Some(id) = stall_requeue.pop_front() {
+                            pending_started.remove(&id);
+                            crucible.set_status(&id, Status::Ore);
+                            crucible.save()?;
+                            println!("  \x1b[38;5;208m↺\x1b[0m [{}] requeued (stall timeout)", id);
+                        }
                     }
                     Err(e) => {
                         last_completion = Instant::now();
@@ -1503,13 +1549,19 @@ pub async fn post_forge_proof_reeval(crucible_path: &Path) -> Result<usize, Slag
     let mut promoted = 0usize;
     let mut crucible = crucible;
 
-    for (id, proof_cmd) in &cracked {
+    let mut proof_set = tokio::task::JoinSet::new();
+    for (id, proof_cmd) in cracked {
         if proof_cmd.is_empty() || proof_cmd == "true" {
             continue;
         }
-        let (ok, _output) = proof::run_shell(proof_cmd).await;
-        if ok {
-            if let Some(ingot) = crucible.get_mut(id) {
+        proof_set.spawn(async move {
+            let (ok, _output) = proof::run_shell(&proof_cmd).await;
+            (id, proof_cmd, ok)
+        });
+    }
+    while let Some(result) = proof_set.join_next().await {
+        if let Ok((id, proof_cmd, true)) = result {
+            if let Some(ingot) = crucible.get_mut(&id) {
                 ingot.status = Status::Forged;
                 promoted += 1;
                 events::emit_info(
