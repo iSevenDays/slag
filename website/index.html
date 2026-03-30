@@ -186,7 +186,7 @@ EOF</code>
  <span style="color:var(--slag-bright);">PICK ORE</span>                       <span style="color:var(--slag-bright);">PARALLEL ANVILS</span>
     |                           +---------+---------+
     v                           |         |         |
- :solo t? ----yes-----> <span style="color:var(--slag-hot);">ANVIL 1</span>   <span style="color:var(--slag-hot);">ANVIL 2</span>   <span style="color:var(--slag-hot);">ANVIL 3</span>
+ :solo t? ----yes-----> <span style="color:var(--slag-hot);">ANVIL 1</span>   <span style="color:var(--slag-hot);">ANVIL 2</span>  ..  <span style="color:var(--slag-hot);">ANVIL 6</span>
     |                      |         |         |
     no                     v         v         v
     |                   (each anvil is independent subshell)
@@ -253,7 +253,7 @@ EOF</code>
               <span is="badge" class="forged phase-num">3</span>
               <span class="phase-name">FORGE</span>
             </div>
-            <p class="phase-desc">Strikes each ingot via the configured smith. Solo ingots run on parallel anvils (up to 3). Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.</p>
+            <p class="phase-desc">Strikes each ingot via the configured smith. Solo ingots run on parallel anvils (up to 6). Stalled anvils are automatically aborted and requeued. Selects smith by skill and grade. Retries with slag feedback on failure. Commits on success.</p>
           </div>
           <div class="phase-card" box="square">
             <div>
@@ -286,7 +286,7 @@ EOF</code>
 
         <details box="square">
           <summary>Why Parallel Anvils?</summary>
-          <p>Independent ingots (:solo t) run concurrently in background subshells, up to MAX_ANVILS=3. This gives 3x throughput for foundation tasks that have no dependencies. Each anvil gets its own smith process. Sequential ingots (:solo nil) run one at a time after parallel work completes.</p>
+          <p>Independent ingots (:solo t) run concurrently in background subshells, up to MAX_ANVILS=6. This gives up to 6x throughput for foundation tasks that have no dependencies. Each anvil gets its own smith process. Sequential ingots (:solo nil) run one at a time after parallel work completes. Stalled anvils (exceeding 2x average sibling completion time, floor 10 min) are automatically aborted and requeued.</p>
         </details>
 
         <details box="square">
