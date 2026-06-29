@@ -8,7 +8,6 @@ use crate::error::SlagError;
 use crate::flux;
 use crate::proof;
 use crate::sexp::{Ingot, Skill, Status};
-use crate::smith::claude::ClaudeSmith;
 use crate::smith::Smith;
 use crate::tui;
 
@@ -520,7 +519,13 @@ async fn try_outcome_subagent(
     reason: &str,
     verbose: bool,
 ) -> Option<String> {
-    let subagent = ClaudeSmith::new(subagent_command());
+    let subagent = match crate::smith::build_smith(&subagent_command()) {
+        Ok(s) => s,
+        Err(e) => {
+            tui::status_line("↺", tui::COLD, &format!("Subagent build failed: {e}"));
+            return None;
+        }
+    };
     let prompt = format!(
         "{}\n\n\
         [SUBAGENT ESCALATION]\n\

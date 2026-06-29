@@ -6,7 +6,6 @@ use crate::crucible::{self, Crucible};
 use crate::error::SlagError;
 use crate::flux;
 use crate::sexp::Ingot;
-use crate::smith::claude::ClaudeSmith;
 use crate::smith::{self, Smith};
 use crate::tui;
 
@@ -316,7 +315,17 @@ async fn try_subagent_founder(
     blueprint: &str,
     previous_raw: &str,
 ) -> Option<(String, Vec<crate::sexp::Ingot>)> {
-    let subagent = ClaudeSmith::new(subagent_command());
+    let subagent = match crate::smith::build_smith(&subagent_command()) {
+        Ok(s) => s,
+        Err(e) => {
+            tui::status_line(
+                "↺",
+                tui::COLD,
+                &format!("Subagent founder build failed: {e}"),
+            );
+            return None;
+        }
+    };
     let prompt = format!(
         "{}\n\n[SUBAGENT ESCALATION]\n\
         Primary founder returned no valid ingots after retries.\n\
@@ -350,7 +359,7 @@ async fn try_subagent_founder(
         }
     };
 
-    let raw = match smith::self_iterate(&subagent, raw, MAX_ITERATE).await {
+    let raw = match smith::self_iterate(&*subagent, raw, MAX_ITERATE).await {
         Ok(v) => v,
         Err(e) => {
             tui::status_line(

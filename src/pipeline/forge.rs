@@ -13,7 +13,6 @@ use crate::ledger::{self, ExperimentRecord};
 use crate::prompt;
 use crate::proof;
 use crate::sexp::{Ingot, Status};
-use crate::smith::claude::ClaudeSmith;
 use crate::smith::response::is_protocol_placeholder_cmd;
 use crate::smith::Smith;
 use crate::tui;
@@ -62,10 +61,11 @@ pub async fn run(
     pipeline_config: &PipelineConfig,
 ) -> Result<Vec<ForgeResult>, SlagError> {
     let mut forged_results: Vec<ForgeResult> = Vec::new();
-    let independent_smith = config
+    let independent_smith: Option<Box<dyn Smith>> = config
         .independent
         .as_ref()
-        .map(|cmd| ClaudeSmith::new(cmd.clone()));
+        .map(|cmd| crate::smith::build_smith(cmd))
+        .transpose()?;
     let use_worktree = pipeline_config.worktree;
     let max_anvils = pipeline_config.max_anvils;
     let sequential_output_mode = if pipeline_config.verbose {
@@ -273,12 +273,12 @@ pub async fn run(
                             ingot.heat = heat_used;
                         }
                         if let Some(ingot) = crucible.get(&id).cloned() {
-                            let smith = ClaudeSmith::new(config.recovery.clone());
+                            let smith = crate::smith::build_smith(&config.recovery)?;
                             if resmelt::resmelt_ingot(
                                 &mut crucible,
                                 &ingot,
-                                &smith,
-                                independent_smith.as_ref().map(|s| s as &dyn Smith),
+                                &*smith,
+                                independent_smith.as_deref(),
                             )
                             .await
                             .is_ok()
@@ -437,12 +437,12 @@ pub async fn run(
                 if let Some(ingot) = crucible.get_mut(&ingot.id) {
                     ingot.heat = heat_used;
                 }
-                let recovery_smith = ClaudeSmith::new(config.recovery.clone());
+                let recovery_smith = crate::smith::build_smith(&config.recovery)?;
                 if resmelt::resmelt_ingot(
                     &mut crucible,
                     &ingot,
-                    &recovery_smith,
-                    independent_smith.as_ref().map(|s| s as &dyn Smith),
+                    &*recovery_smith,
+                    independent_smith.as_deref(),
                 )
                 .await
                 .is_ok()
@@ -472,8 +472,24 @@ async fn strike_ingot_with_chain(
 ) -> Result<ForgeResult, SlagError> {
     let mut last_error: Option<SlagError> = None;
     for (idx, smith_cmd) in smith_chain.iter().enumerate() {
-        let smith = ClaudeSmith::new(smith_cmd.clone());
-        match strike_ingot(ingot, &smith, smith_cmd, worktree_mode, output_mode).await {
+        let smith = match crate::smith::build_smith(smith_cmd) {
+            Ok(s) => s,
+            Err(e) => {
+                // Treat construction failure (e.g., vllm without SLAG_VLLM_BASE_URL)
+                // as a failover candidate so the next chain entry is tried.
+                events::emit_warn(
+                    "forge.smith.build_failed",
+                    "smith construction failed; trying next fallback",
+                    serde_json::json!({
+                        "smith": smith_cmd,
+                        "reason": e.to_string(),
+                    }),
+                );
+                last_error = Some(e);
+                continue;
+            }
+        };
+        match strike_ingot(ingot, &*smith, smith_cmd, worktree_mode, output_mode).await {
             Ok(result) => return Ok(result),
             Err(err) if is_smith_failover_candidate(&err) && idx + 1 < smith_chain.len() => {
                 let next = &smith_chain[idx + 1];
