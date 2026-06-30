@@ -29,9 +29,15 @@ pub fn prepare_flux(ingot: &Ingot, slag: Option<&str>) -> String {
 /// Build flux using pre-loaded cache for blueprint and alloy.
 /// Crucible, ledger, and git diff are re-read per heat (they change).
 pub fn prepare_flux_cached(ingot: &Ingot, slag: Option<&str>, cache: &FluxCache) -> String {
-    let crucible_compact = compact_crucible(ingot);
-    let ledger = read_tail(LEDGER, 25);
+    let crucible_compact_raw = compact_crucible(ingot);
+    let ledger_raw = read_tail(LEDGER, 25);
     let git_diff = git_diff_stat();
+
+    // Apply SLAG_PROMPT_BUDGET_TOKENS budget enforcement (U5): head-tail truncate
+    // large context sections if total chars exceed the budget before adding the
+    // format contract block (which is always appended at the end, sandwich pattern).
+    let (blueprint, crucible_compact, ledger) =
+        apply_prompt_budget(&cache.blueprint, &crucible_compact_raw, &ledger_raw);
 
     let complex_note = if ingot.grade >= HIGH_GRADE {
         " ◉ COMPLEX"
@@ -73,7 +79,7 @@ pub fn prepare_flux_cached(ingot: &Ingot, slag: Option<&str>, cache: &FluxCache)
         heat = ingot.heat,
         max = ingot.max,
         proof = ingot.proof,
-        blueprint = cache.blueprint,
+        blueprint = blueprint,
         alloy = cache.alloy,
     );
 
@@ -691,4 +697,122 @@ fn git_log_and_diff() -> String {
         })
         .unwrap_or_else(|| "No commits".into());
     format!("{diff}\n{log}")
+}
+
+// ── Budget enforcement (U5) ──────────────────────────────────────────────────
+
+/// Returns the prompt budget in chars from `SLAG_PROMPT_BUDGET_TOKENS`, or None (no limit).
+/// One token ≈ 4 chars (cheap heuristic; not exact).
+fn prompt_budget_chars() -> Option<usize> {
+    std::env::var("SLAG_PROMPT_BUDGET_TOKENS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .map(|tokens| tokens * 4)
+}
+
+/// Head-tail truncation: keep first 30% and last 30% of content, drop the middle.
+/// Used to compress long BLUEPRINT/CRUCIBLE/LEDGER sections when over budget.
+fn truncate_head_tail(content: &str, label: &str, max_chars: usize) -> String {
+    if content.len() <= max_chars {
+        return content.to_string();
+    }
+    let head_chars = (max_chars * 30 / 100).max(1);
+    let tail_chars = (max_chars * 30 / 100).max(1);
+    let head = &content[..head_chars.min(content.len())];
+    let tail_start = content.len().saturating_sub(tail_chars);
+    let tail = &content[tail_start..];
+    let omitted = content.len().saturating_sub(head_chars + tail_chars);
+    format!(
+        "{head}\n[...{label}: {omitted} chars omitted (SLAG_PROMPT_BUDGET_TOKENS)...]\n{tail}"
+    )
+}
+
+/// Apply budget constraints to the three large context sections.
+/// Returns (blueprint, crucible, ledger) — truncated if the total exceeds the budget.
+fn apply_prompt_budget(
+    blueprint: &str,
+    crucible: &str,
+    ledger: &str,
+) -> (String, String, String) {
+    let Some(budget_chars) = prompt_budget_chars() else {
+        return (blueprint.to_string(), crucible.to_string(), ledger.to_string());
+    };
+    let total = blueprint.len() + crucible.len() + ledger.len();
+    if total <= budget_chars {
+        return (blueprint.to_string(), crucible.to_string(), ledger.to_string());
+    }
+    // Allocate budget evenly among the three sections
+    let per_section = (budget_chars / 3).max(64);
+    (
+        truncate_head_tail(blueprint, "blueprint", per_section),
+        truncate_head_tail(crucible, "crucible", per_section),
+        truncate_head_tail(ledger, "ledger", per_section),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_head_tail_leaves_small_content_unchanged() {
+        let content = "abc";
+        assert_eq!(truncate_head_tail(content, "x", 100), "abc");
+    }
+
+    #[test]
+    fn truncate_head_tail_drops_middle_when_over_budget() {
+        let content = "a".repeat(1000);
+        let truncated = truncate_head_tail(&content, "test", 100);
+        assert!(truncated.contains("omitted"));
+        assert!(truncated.len() < content.len());
+    }
+
+    #[test]
+    fn truncate_head_tail_preserves_head_and_tail() {
+        let content = format!("HEADSTART{}{}", "x".repeat(500), "TAILEND");
+        let truncated = truncate_head_tail(&content, "test", 60);
+        assert!(truncated.starts_with("HEADSTART"), "head preserved");
+        assert!(truncated.ends_with("TAILEND"), "tail preserved: {truncated}");
+    }
+
+    #[test]
+    fn apply_prompt_budget_no_truncation_without_env_var() {
+        // No SLAG_PROMPT_BUDGET_TOKENS set → no truncation
+        std::env::remove_var("SLAG_PROMPT_BUDGET_TOKENS");
+        let bp = "a".repeat(100_000);
+        let cr = "b".repeat(100_000);
+        let ld = "c".repeat(100_000);
+        let (out_bp, out_cr, out_ld) = apply_prompt_budget(&bp, &cr, &ld);
+        assert_eq!(out_bp.len(), bp.len());
+        assert_eq!(out_cr.len(), cr.len());
+        assert_eq!(out_ld.len(), ld.len());
+    }
+
+    #[test]
+    fn apply_prompt_budget_truncates_when_over_budget() {
+        std::env::set_var("SLAG_PROMPT_BUDGET_TOKENS", "100"); // 400 chars budget
+        let bp = "blueprint ".repeat(200); // ~2000 chars
+        let cr = "crucible ".repeat(200);  // ~1800 chars
+        let ld = "ledger ".repeat(200);    // ~1400 chars
+        let (out_bp, out_cr, out_ld) = apply_prompt_budget(&bp, &cr, &ld);
+        std::env::remove_var("SLAG_PROMPT_BUDGET_TOKENS");
+        assert!(out_bp.contains("omitted"), "blueprint should be truncated");
+        assert!(out_cr.contains("omitted"), "crucible should be truncated");
+        assert!(out_ld.contains("omitted"), "ledger should be truncated");
+    }
+
+    #[test]
+    fn apply_prompt_budget_skips_truncation_when_under_budget() {
+        std::env::set_var("SLAG_PROMPT_BUDGET_TOKENS", "50000"); // 200K chars — well above
+        let bp = "short blueprint".to_string();
+        let cr = "short crucible".to_string();
+        let ld = "short ledger".to_string();
+        let (out_bp, out_cr, out_ld) = apply_prompt_budget(&bp, &cr, &ld);
+        std::env::remove_var("SLAG_PROMPT_BUDGET_TOKENS");
+        assert_eq!(out_bp, bp);
+        assert_eq!(out_cr, cr);
+        assert_eq!(out_ld, ld);
+    }
 }

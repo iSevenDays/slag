@@ -88,3 +88,7 @@ src/
 - Smith trait allows swapping Claude for mock in tests
 - Crucible operations are atomic (load, modify, save)
 - `website/public/slag.sh` is a copy of root `slag.sh` for download — sync manually
+
+## Configuration
+
+Full env-var reference (including vLLM/Qwen vars and precedence rules): `docs/configuration.md`

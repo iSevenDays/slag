@@ -183,11 +183,7 @@ pub struct CrucibleCounts {
 
 impl CrucibleCounts {
     pub fn pct_forged(&self) -> u8 {
-        if self.total == 0 {
-            0
-        } else {
-            (self.forged * 100 / self.total) as u8
-        }
+        (self.forged * 100).checked_div(self.total).unwrap_or(0) as u8
     }
 }
 

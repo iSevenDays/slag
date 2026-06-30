@@ -377,6 +377,7 @@ async fn try_subagent_founder(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::smith::mock::MockSmith;
     use crate::sexp::{Skill, Status};
 
     fn sample_ingot(id: &str) -> Ingot {
@@ -441,5 +442,112 @@ mod tests {
         assert_eq!(out[0].smelt, 0);
         assert_eq!(out[0].max, 5);
         assert_eq!(out[0].grade, 1);
+    }
+
+    // Characterization tests: capture the format-retry loop behavior so refactoring
+    // to bounded_retry can be verified as behavior-preserving.
+
+    /// When the smith returns valid ingot S-expressions on the first attempt,
+    /// no format retries should occur (the loop breaks immediately).
+    #[tokio::test]
+    async fn format_retry_loop_succeeds_first_attempt_no_retries() {
+        // Simulate: first smith response already contains valid ingot lines.
+        // The loop guard `if !ingots.is_empty() { break; }` fires immediately.
+        let raw = "(ingot :id \"i1\" :status ore :solo t :grade 1 :skill default \
+                   :heat 0 :max 5 :proof \"cargo test\" :work \"Add tests\")";
+        let ingots = crucible::parse_ingot_lines(raw);
+        assert!(!ingots.is_empty(), "setup: raw should parse to at least one ingot");
+
+        let sanitized = sanitize_founder_ingots(ingots);
+        assert_eq!(sanitized.len(), 1, "one valid ingot should survive sanitization");
+        assert_eq!(sanitized[0].id, "i1");
+        // format_retries stays 0, confidence is based on the sanitized output
+        let confidence = founder_confidence(raw, &sanitized, 0);
+        assert!(confidence > 0.70, "clean first-attempt output should yield high confidence");
+    }
+
+    /// When the smith returns prose on attempt 0 (no ingots parsed),
+    /// the loop retries up to MAX_ITERATE times.  Each retry calls smith.invoke once.
+    /// After exhaustion, ingots remain empty.
+    #[tokio::test]
+    async fn format_retry_loop_exhausts_on_all_prose_responses() {
+        // All responses are prose — no ingots are ever parsed.
+        let prose = "Here is my analysis of the requirements...".to_string();
+        let smith = MockSmith::fixed(&prose);
+
+        // Simulate the loop body: initial call + up to MAX_ITERATE retries.
+        // We don't call founder::run (requires filesystem), so we exercise
+        // the loop logic directly using the same primitives.
+        let mut ingots = crucible::parse_ingot_lines(&prose);
+        let mut format_retries = 0usize;
+
+        for attempt in 1..=MAX_ITERATE {
+            if !ingots.is_empty() {
+                break;
+            }
+            format_retries += 1;
+            let repair_prompt = flux::founder_recast_prompt("ore text", "blueprint text", &prose);
+            let retry_raw = smith.invoke(&repair_prompt).await.unwrap();
+            let iterated = smith::self_iterate(&smith, retry_raw, MAX_ITERATE).await.unwrap();
+            ingots = sanitize_founder_ingots(crucible::parse_ingot_lines(&iterated));
+            let _ = attempt; // used only to match real loop variable
+        }
+
+        assert!(ingots.is_empty(), "prose-only responses should leave ingots empty");
+        assert_eq!(format_retries, MAX_ITERATE, "all MAX_ITERATE retries should be consumed");
+        // smith was called at least MAX_ITERATE times (one per retry)
+        assert!(smith.call_count() >= MAX_ITERATE);
+    }
+
+    /// Characterization: the format-retry loop calls smith.invoke at least once per
+    /// retry attempt, and self_iterate may consume additional slots in the cycling mock.
+    /// When all responses are prose (no ingots), the loop exhausts all MAX_ITERATE
+    /// retries and the smith is called at least MAX_ITERATE times total.
+    /// This documents the current behavior so any refactor can be verified against it.
+    #[tokio::test]
+    async fn format_retry_loop_characterization_calls_smith_per_retry() {
+        // All responses are prose — no ingots ever parsed, so loop runs all MAX_ITERATE attempts.
+        let prose = "Here is a description without any ingots.".to_string();
+        let smith = MockSmith::fixed(&prose);
+
+        let mut ingots = crucible::parse_ingot_lines(&prose);
+        let mut format_retries = 0usize;
+        let mut final_raw = prose.clone();
+
+        for _attempt in 1..=MAX_ITERATE {
+            if !ingots.is_empty() {
+                break;
+            }
+            format_retries += 1;
+            let repair_prompt =
+                flux::founder_recast_prompt("ore text", "blueprint text", &final_raw);
+            let retry_raw = smith.invoke(&repair_prompt).await.unwrap();
+            let iterated = smith::self_iterate(&smith, retry_raw, MAX_ITERATE).await.unwrap();
+            final_raw = iterated.clone();
+            ingots = sanitize_founder_ingots(crucible::parse_ingot_lines(&iterated));
+        }
+
+        // All prose → loop exhausts every retry slot
+        assert_eq!(format_retries, MAX_ITERATE, "all retries consumed on prose-only responses");
+        // self_iterate doesn't call smith when there are no questions (prose without '?'),
+        // so smith.call_count == MAX_ITERATE (one per retry attempt).
+        assert_eq!(
+            smith.call_count(),
+            MAX_ITERATE,
+            "smith called exactly once per retry attempt when self_iterate is a noop"
+        );
+        assert!(ingots.is_empty(), "no ingots should have been parsed from prose");
+    }
+
+    /// Confidence degrades with each format retry consumed.
+    #[tokio::test]
+    async fn founder_confidence_degrades_linearly_with_retries() {
+        let ingots = vec![sample_ingot("i1"), sample_ingot("i2")];
+        let raw = "(ingot ...)";
+        let score_0 = founder_confidence(raw, &ingots, 0);
+        let score_1 = founder_confidence(raw, &ingots, 1);
+        let score_2 = founder_confidence(raw, &ingots, 2);
+        assert!(score_0 > score_1, "0 retries should score higher than 1");
+        assert!(score_1 > score_2, "1 retry should score higher than 2");
     }
 }

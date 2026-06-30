@@ -1,0 +1,4 @@
+=== PROMPT ===
+ROLE: Master Founder. Cast ingots.
+---ASSERT---
+format_violation

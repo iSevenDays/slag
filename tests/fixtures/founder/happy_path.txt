@@ -1,0 +1,16 @@
+=== PROMPT ===
+ROLE: Master Founder. Cast ingots from blueprint.
+
+COMMISSION:
+Build a simple hello world CLI
+
+BLUEPRINT:
+## Overview
+A minimal CLI that prints "Hello, world!"
+
+OUTPUT: S-expressions only. One per line. No prose.
+
+OUTPUT ONLY S-EXPRESSIONS:
+---ASSERT---
+parseable_ingot
+trailing_cmd

@@ -4,6 +4,7 @@ pub mod forge;
 pub mod founder;
 pub mod outcome;
 pub mod quarrier;
+pub mod recast;
 pub mod resmelt;
 pub mod review;
 pub mod surveyor;

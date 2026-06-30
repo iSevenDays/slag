@@ -474,4 +474,137 @@ Proof failed [curl -sf http://localhost:5175/ | grep -q 'CRACKS\\\\|canvas']:";
             "curl -sf http://localhost:5175/ | grep -qF 'CRACKS'"
         )));
     }
+
+    // Characterization tests: capture attempt_lane / generate_repair_candidates behavior
+    // so that any future migration to bounded_retry can be verified as behavior-preserving.
+
+    /// When smith returns "IMPOSSIBLE:", attempt_lane returns Err containing "declared impossible".
+    #[tokio::test]
+    async fn attempt_lane_rejects_impossible_response() {
+        use crate::smith::mock::MockSmith;
+        let smith = MockSmith::fixed("IMPOSSIBLE: the task cannot be done\n");
+        let ingot = ingot_with("Some task", "cargo test", 0);
+        let result = attempt_lane(
+            RepairMode::Resmelt,
+            Lane::Primary,
+            &smith,
+            "prompt",
+            &ingot,
+            1,
+            &HashSet::new(),
+        )
+        .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("impossible"),
+            "expected 'impossible' in: {msg}"
+        );
+    }
+
+    /// When smith returns prose with no ingot S-expressions, attempt_lane returns Err
+    /// containing "no ingot output parsed".
+    #[tokio::test]
+    async fn attempt_lane_rejects_prose_with_no_ingots() {
+        use crate::smith::mock::MockSmith;
+        let smith = MockSmith::fixed("I suggest you try a different approach entirely.");
+        let ingot = ingot_with("Some task", "cargo test", 0);
+        let result = attempt_lane(
+            RepairMode::Resmelt,
+            Lane::Primary,
+            &smith,
+            "prompt",
+            &ingot,
+            1,
+            &HashSet::new(),
+        )
+        .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("no ingot output parsed"),
+            "expected 'no ingot output parsed' in: {msg}"
+        );
+    }
+
+    /// When smith returns a valid ingot with changed work/proof and correct smelt,
+    /// attempt_lane returns Ok with the parsed ingots.
+    #[tokio::test]
+    async fn attempt_lane_accepts_valid_novel_resmelt() {
+        use crate::smith::mock::MockSmith;
+        // Valid ingot with smelt=1 (expected_smelt for Resmelt), different work/proof
+        let response = "(ingot :id \"i9\" :status ore :solo t :grade 2 :skill default \
+                         :heat 0 :max 5 :smelt 1 \
+                         :proof \"cargo build --release\" \
+                         :work \"Build release binary\")";
+        let smith = MockSmith::fixed(response);
+        let original = ingot_with("Some task", "cargo test", 0);
+        let result = attempt_lane(
+            RepairMode::Resmelt,
+            Lane::Primary,
+            &smith,
+            "prompt",
+            &original,
+            1, // expected_smelt
+            &HashSet::new(),
+        )
+        .await;
+        assert!(result.is_ok(), "expected Ok but got: {:?}", result.err());
+        let ingots = result.unwrap();
+        assert_eq!(ingots.len(), 1);
+        assert_eq!(ingots[0].id, "i9");
+    }
+
+    /// generate_repair_candidates falls back to Err(IngotCracked) when both primary
+    /// and independent lanes fail (independent returns prose).
+    #[tokio::test]
+    async fn generate_repair_candidates_returns_cracked_when_both_lanes_fail() {
+        use crate::smith::mock::MockSmith;
+        let prose = "No ingots here.";
+        let primary_smith = MockSmith::fixed(prose);
+        let independent_smith = MockSmith::fixed(prose);
+        let ingot = ingot_with("Some task", "cargo test", 0);
+        let failure_logs = "No failure logs found";
+        let prompt = "repair this";
+        let result = generate_repair_candidates(
+            RepairMode::Resmelt,
+            &ingot,
+            prompt,
+            failure_logs,
+            &primary_smith,
+            Some(&independent_smith),
+        )
+        .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::SlagError::IngotCracked(id, _) => {
+                assert_eq!(id, "i9");
+            }
+            e => panic!("expected IngotCracked, got {e:?}"),
+        }
+    }
+
+    /// generate_repair_candidates succeeds when primary lane returns a valid novel ingot.
+    #[tokio::test]
+    async fn generate_repair_candidates_succeeds_with_valid_primary() {
+        use crate::smith::mock::MockSmith;
+        let response = "(ingot :id \"i9\" :status ore :solo t :grade 2 :skill default \
+                         :heat 0 :max 5 :smelt 1 \
+                         :proof \"cargo build --release\" \
+                         :work \"Build release binary\")";
+        let smith = MockSmith::fixed(response);
+        let ingot = ingot_with("Some task", "cargo test", 0);
+        let result = generate_repair_candidates(
+            RepairMode::Resmelt,
+            &ingot,
+            "prompt",
+            "No failure logs found",
+            &smith,
+            None,
+        )
+        .await;
+        assert!(result.is_ok(), "expected Ok but got: {:?}", result.err());
+        let ingots = result.unwrap();
+        assert!(!ingots.is_empty());
+    }
 }
