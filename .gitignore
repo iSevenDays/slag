@@ -10,4 +10,7 @@ logs/
 .vscode/
 .idea/
 .claude/settings.local.json
+.claude/worktrees/
+.omc/
+PROGRESS.md
 .playwright-mcp/

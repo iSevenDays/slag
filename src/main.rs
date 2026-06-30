@@ -22,7 +22,7 @@ use std::path::Path;
 
 use clap::Parser;
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, SmithCommands};
 use config::{LogFormat, PipelineConfig, PromptPolicy, SmithConfig, DEFAULT_PROMPT_TIMEOUT_SECS};
 
 #[tokio::main]
@@ -80,6 +80,12 @@ async fn main() {
             let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
             let target_text = target.join(" ");
             self_improve::run(&target_text, &smith_config, &pipeline_config).await
+        }
+        Some(Command::Smith {
+            subcommand: SmithCommands::Doctor,
+        }) => {
+            let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);
+            smith::doctor::run(&smith_config).await
         }
         None => {
             let smith_config = SmithConfig::from_env_with_overrides(&smith_overrides);

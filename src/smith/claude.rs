@@ -10,7 +10,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use super::Smith;
-use crate::config::SmithConfig;
+use crate::config::{SmithCapabilities, SmithConfig, PromptRepeatMode};
 use crate::error::SlagError;
 use crate::events;
 
@@ -19,31 +19,10 @@ const DEFAULT_PROMPT_REPEAT_MAX_CHARS: usize = 40_000;
 const DEFAULT_SMITH_TIMEOUT_SECS: u64 = 300;
 const CLAUDE_AUTH_STATUS_TIMEOUT_SECS: u64 = 10;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptRepeatMode {
-    Off,
-    NonPlan,
-    Always,
-}
-
-impl PromptRepeatMode {
-    fn from_env() -> Self {
-        match std::env::var("SLAG_PROMPT_REPEAT_MODE")
-            .unwrap_or_else(|_| "non-plan".to_string())
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "off" | "never" | "0" => Self::Off,
-            "always" | "all" | "on" => Self::Always,
-            _ => Self::NonPlan,
-        }
-    }
-}
-
 /// Subprocess-backed smith adapter used for Claude-compatible and stdin-driven CLIs.
 pub struct ClaudeSmith {
     command: String,
+    capabilities: SmithCapabilities,
 }
 
 struct SmithSubprocessResult {
@@ -53,29 +32,36 @@ struct SmithSubprocessResult {
 
 impl ClaudeSmith {
     pub fn new(command: String) -> Self {
-        Self { command }
+        Self {
+            command,
+            capabilities: SmithCapabilities::claude(),
+        }
     }
 
     pub fn from_config(config: &SmithConfig, skill: &str, grade: u8) -> Self {
         Self {
             command: config.select(skill, grade).to_string(),
+            capabilities: SmithCapabilities::claude(),
         }
     }
 
     pub fn plan(config: &SmithConfig) -> Self {
         Self {
             command: config.plan.clone(),
+            capabilities: SmithCapabilities::claude(),
         }
     }
 
     pub fn base(config: &SmithConfig) -> Self {
         Self {
             command: config.base.clone(),
+            capabilities: SmithCapabilities::claude(),
         }
     }
 
     async fn invoke_impl(&self, prompt: &str, cwd: Option<&Path>) -> Result<String, SlagError> {
-        let repeated_prompt = maybe_repeat_prompt(prompt, &self.command);
+        let is_plan_mode = self.command.contains("--permission-mode plan");
+        let repeated_prompt = maybe_repeat_prompt(prompt, &self.capabilities, is_plan_mode);
         let parts: Vec<&str> = shell_words(&self.command);
         if parts.is_empty() {
             return Err(SlagError::SmithFailed("empty smith command".into()));
@@ -351,8 +337,21 @@ fn truncate_for_log(text: &str, max_chars: usize) -> String {
     }
 }
 
-fn maybe_repeat_prompt(prompt: &str, command: &str) -> String {
-    let mode = PromptRepeatMode::from_env();
+fn maybe_repeat_prompt(
+    prompt: &str,
+    capabilities: &SmithCapabilities,
+    is_plan_mode: bool,
+) -> String {
+    // SLAG_PROMPT_REPEAT_MODE env var overrides the capability profile's mode.
+    let mode = std::env::var("SLAG_PROMPT_REPEAT_MODE")
+        .ok()
+        .map(|v| match v.trim().to_ascii_lowercase().as_str() {
+            "off" | "never" | "0" => PromptRepeatMode::Off,
+            "always" | "all" | "on" => PromptRepeatMode::Always,
+            _ => PromptRepeatMode::NonPlan,
+        })
+        .unwrap_or(capabilities.prompt_repeat_mode);
+
     let count = std::env::var("SLAG_PROMPT_REPEAT_COUNT")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -378,12 +377,12 @@ fn maybe_repeat_prompt(prompt: &str, command: &str) -> String {
                 "count": count
             }),
         );
-        if !should_repeat(mode, command) {
+        if !should_repeat(mode, is_plan_mode) {
             return prompt.to_string();
         }
         return repeat_tail(prompt, count);
     }
-    if !should_repeat(mode, command) {
+    if !should_repeat(mode, is_plan_mode) {
         return prompt.to_string();
     }
 
@@ -394,18 +393,18 @@ fn maybe_repeat_prompt(prompt: &str, command: &str) -> String {
             "mode": format!("{mode:?}"),
             "count": count,
             "prompt_chars": prompt.len(),
-            "command_has_plan": command.contains("--permission-mode plan")
+            "is_plan_mode": is_plan_mode
         }),
     );
 
     repeat_prompt(prompt, count)
 }
 
-fn should_repeat(mode: PromptRepeatMode, command: &str) -> bool {
+fn should_repeat(mode: PromptRepeatMode, is_plan_mode: bool) -> bool {
     match mode {
         PromptRepeatMode::Off => false,
         PromptRepeatMode::Always => true,
-        PromptRepeatMode::NonPlan => !command.contains("--permission-mode plan"),
+        PromptRepeatMode::NonPlan => !is_plan_mode,
     }
 }
 
@@ -459,6 +458,10 @@ impl Smith for ClaudeSmith {
         let prompt = prompt.to_string();
         let dir = PathBuf::from(dir);
         Box::pin(async move { self.invoke_impl(&prompt, Some(&dir)).await })
+    }
+
+    fn capabilities(&self) -> &SmithCapabilities {
+        &self.capabilities
     }
 }
 
@@ -549,14 +552,34 @@ mod tests {
 
     #[test]
     fn non_plan_mode_detects_plan_flag() {
-        assert!(!should_repeat(
-            PromptRepeatMode::NonPlan,
-            "claude -p --permission-mode plan"
-        ));
-        assert!(should_repeat(
-            PromptRepeatMode::NonPlan,
-            "claude -p --dangerously-skip-permissions"
-        ));
+        // is_plan_mode=true → should NOT repeat
+        assert!(!should_repeat(PromptRepeatMode::NonPlan, true));
+        // is_plan_mode=false → should repeat
+        assert!(should_repeat(PromptRepeatMode::NonPlan, false));
+    }
+
+    #[test]
+    fn claude_smith_capabilities_name_is_claude() {
+        let smith = ClaudeSmith::new("claude -p".to_string());
+        assert_eq!(smith.capabilities().name, "claude");
+    }
+
+    #[test]
+    fn claude_smith_capabilities_does_not_support_structured_outputs() {
+        let smith = ClaudeSmith::new("claude -p --permission-mode bypassPermissions".to_string());
+        assert!(!smith.capabilities().supports_structured_outputs);
+    }
+
+    #[test]
+    fn should_repeat_off_mode_never_repeats() {
+        assert!(!should_repeat(PromptRepeatMode::Off, false));
+        assert!(!should_repeat(PromptRepeatMode::Off, true));
+    }
+
+    #[test]
+    fn should_repeat_always_mode_always_repeats() {
+        assert!(should_repeat(PromptRepeatMode::Always, false));
+        assert!(should_repeat(PromptRepeatMode::Always, true));
     }
 
     #[test]

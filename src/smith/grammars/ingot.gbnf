@@ -1,0 +1,21 @@
+# Ingot S-expression grammar for vLLM xgrammar structured output
+root   ::= ingot
+ingot  ::= "(ingot" ws fields ws ")"
+fields ::= (field ws)*
+field  ::= ":id" ws string
+         | ":status" ws status
+         | ":solo" ws bool
+         | ":grade" ws digit
+         | ":skill" ws skill
+         | ":heat" ws number
+         | ":max" ws number
+         | ":smelt" ws number
+         | ":proof" ws string
+         | ":work" ws string
+status ::= "ore" | "molten" | "forged" | "cracked"
+bool   ::= "t" | "nil"
+skill  ::= "default" | "web" | "api" | "cli"
+string ::= "\"" [^"]* "\""
+number ::= [0-9]+
+digit  ::= [1-9]
+ws     ::= [ \t\n]*

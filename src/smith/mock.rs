@@ -26,6 +26,12 @@ impl MockSmith {
         Self::new(vec![])
     }
 
+    /// Returns responses in sequence, cycling from the last when exhausted.
+    /// Alias for `new` — provided for readable test setup in the bench harness.
+    pub fn scripted(responses: Vec<String>) -> Self {
+        Self::new(responses)
+    }
+
     pub fn call_count(&self) -> usize {
         self.call_count.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -75,5 +81,14 @@ mod tests {
     async fn failing_smith() {
         let smith = MockSmith::failing();
         assert!(smith.invoke("test").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn invoke_with_constraints_falls_through_to_invoke() {
+        use crate::smith::StructuredOutputSpec;
+        let smith = MockSmith::fixed("response");
+        let spec = StructuredOutputSpec::Regex(".*".to_string());
+        let result = smith.invoke_with_constraints("prompt", Some(&spec)).await;
+        assert_eq!(result.unwrap(), "response");
     }
 }

@@ -1,6 +1,12 @@
 use crate::config::{LogFormat, PromptPolicy, SmithOverrides};
 use clap::{Parser, Subcommand};
 
+#[derive(Debug, Subcommand)]
+pub enum SmithCommands {
+    /// Probe each configured smith and print reachability + capability summary
+    Doctor,
+}
+
 #[derive(Parser)]
 #[command(
     name = "slag",
@@ -97,6 +103,12 @@ pub enum Command {
         /// Improvement target: quality|tests|performance|tokens or freeform text
         #[arg(trailing_var_arg = true, default_values_t = vec!["quality".to_string()])]
         target: Vec<String>,
+    },
+
+    /// Smith diagnostics and configuration tools
+    Smith {
+        #[command(subcommand)]
+        subcommand: SmithCommands,
     },
 }
 

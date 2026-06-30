@@ -14,6 +14,7 @@ use crate::prompt;
 use crate::proof;
 use crate::sexp::{Ingot, Status};
 use crate::smith::claude::ClaudeSmith;
+use crate::smith::response::is_protocol_placeholder_cmd;
 use crate::smith::Smith;
 use crate::tui;
 
@@ -1308,6 +1309,12 @@ fn is_smith_failover_candidate(err: &SlagError) -> bool {
                 || msg.contains("usage limit")
                 || msg.contains("rate limit")
                 || msg.contains("try again at")
+                // vLLM HTTP error patterns — connect failures and 5xx are retryable
+                || msg.starts_with("connect:")
+                || msg.starts_with("http 429")
+                || msg.starts_with("http 503")
+                || msg.starts_with("http 5")
+                || msg == "vllm: empty choices"
         }
         _ => false,
     }
@@ -1325,6 +1332,11 @@ fn failure_signature(output: &str) -> String {
                 && !l.starts_with("CMD:")
                 && !l.starts_with("Files changed:")
                 && !l.starts_with("===")
+                // structured-failure envelope lines (U1) — skip so distinct
+                // failure classes don't collapse into the 3-identical bail
+                && !l.starts_with("FailureClass:")
+                && !l.starts_with("Smith:")
+                && !l.starts_with("Attempt:")
         })
         .take(3)
         .collect::<Vec<_>>()
@@ -1398,27 +1410,6 @@ fn format_slag_message(
         Error output:\n{truncated}\n\
         ==="
     )
-}
-
-fn is_protocol_placeholder_cmd(cmd: &str) -> bool {
-    let trimmed = cmd.trim();
-    if trimmed.is_empty() {
-        return true;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.contains("<shell command") {
-        return true;
-    }
-    if lower.contains("line in response") {
-        return true;
-    }
-    if lower.contains("missing \"cmd:\"") || lower.contains("no cmd") {
-        return true;
-    }
-    if lower.contains("analyze and fix") {
-        return true;
-    }
-    false
 }
 
 fn refresh_ingot_from_crucible(ingot: &mut Ingot) {
@@ -1882,5 +1873,37 @@ mod tests {
         assert!(sig.contains("error: actual problem"));
         assert!(!sig.contains("HEAT FAILED"));
         assert!(!sig.contains("Type:"));
+    }
+
+    #[test]
+    fn failure_signature_skips_u1_envelope_lines() {
+        let envelope = "FailureClass: format_violation\nSmith: claude\nAttempt: 2\nerror: actual content";
+        let sig = failure_signature(envelope);
+        assert!(sig.contains("error: actual content"));
+        assert!(!sig.contains("FailureClass:"));
+        assert!(!sig.contains("Smith:"));
+        assert!(!sig.contains("Attempt:"));
+    }
+
+    #[test]
+    fn failure_signature_same_class_different_attempt_collides() {
+        // Same failure class + same error body, but different envelope attempt numbers → same sig
+        let a = "FailureClass: cmd_missing\nSmith: claude\nAttempt: 1\nerror: no CMD line in response";
+        let b = "FailureClass: cmd_missing\nSmith: codex\nAttempt: 3\nerror: no CMD line in response";
+        assert_eq!(failure_signature(a), failure_signature(b));
+    }
+
+    #[test]
+    fn failure_signature_different_classes_differ() {
+        let a = "FailureClass: cmd_missing\nerror: missing CMD line";
+        let b = "FailureClass: http_error\nerror: connection refused";
+        assert_ne!(failure_signature(a), failure_signature(b));
+    }
+
+    #[test]
+    fn failure_signature_unchanged_for_legacy_input() {
+        let legacy = "error: cannot read file\nat src/lib.rs:10\nstack: ...";
+        let sig = failure_signature(legacy);
+        assert!(sig.contains("error: cannot read file"));
     }
 }

@@ -1,0 +1,4 @@
+=== PROMPT ===
+=== RE-SMELT ANALYSIS ===
+---ASSERT---
+action_keyword: REWRITE|SPLIT|IMPOSSIBLE

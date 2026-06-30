@@ -209,6 +209,41 @@ Common selectors for `--smith` and `SLAG_SMITH`: `claude`, `claude-plan`, `codex
 Forge now uses a runtime failover chain: if the active smith hard-fails protocol/invocation for an ingot, slag retries that ingot on the next smith in `SLAG_SMITH_CHAIN` automatically.
 For Claude CLI specifically, slag keeps the current auth mode first, but if `ANTHROPIC_API_KEY` is set and the run fails with an API-key or billing-style error, it checks whether Claude subscription auth is already available and retries once with `ANTHROPIC_API_KEY` removed.
 
+## Smiths
+
+Slag supports three smith transports:
+
+| Transport | Examples | How it works |
+|-----------|---------|-------------|
+| **Subprocess** | `claude`, `codex`, `gemini` | Spawns a CLI, writes prompt to stdin, reads stdout |
+| **HTTP** | vLLM, any OpenAI-compatible server | POST to `/v1/chat/completions` via `reqwest` |
+| **Mock** | test harness | In-process canned responses for testing |
+
+### vLLM / Qwen quickstart (LAN setup)
+
+```bash
+# Required
+export SLAG_VLLM_BASE_URL=http://192.168.0.24:8080
+
+# Optional — defaults shown
+# SLAG_VLLM_MODEL=auto          # "auto" lets vLLM pick the loaded model
+# SLAG_VLLM_API_KEY=EMPTY       # non-empty token required (vLLM issue #33412)
+# SLAG_VLLM_TIMEOUT_SECS=300    # inherits SLAG_SMITH_TIMEOUT_SECS
+# SLAG_VLLM_ENABLE_THINKING=1   # default true (set to 0 to disable)
+
+slag "Build a REST API"
+```
+
+vLLM is added to the auto-detection chain when `SLAG_VLLM_BASE_URL` is set. It acts as a fallback after any subprocess smiths, or as the primary when you set `SLAG_SMITH=vllm`.
+
+Diagnose your configured smiths with:
+
+```bash
+slag smith doctor
+```
+
+See `docs/configuration.md` for the full env-var reference and precedence rules.
+
 ## Progress display
 
 slag shows emoji progress in the terminal:

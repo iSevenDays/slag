@@ -1,0 +1,6 @@
+=== PROMPT ===
+=== OUTCOME VALIDATION ===
+STATUS: PASS
+---ASSERT---
+status_enum: PASS|FAIL
+trailing_cmd

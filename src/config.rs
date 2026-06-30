@@ -131,6 +131,11 @@ impl SmithConfig {
         }
     }
 
+    /// Return the base chain for doctor diagnostics (deduped command list).
+    pub fn base_chain_for_doctor(&self) -> &[String] {
+        &self.base_chain
+    }
+
     /// Select smith command chain (primary + fallbacks) for skill and grade.
     pub fn select_chain(&self, skill: &str, grade: u8) -> Vec<String> {
         let mut chain = Vec::new();
@@ -205,11 +210,14 @@ fn auto_detect_smith_chain() -> Vec<String> {
         .as_deref()
         .map(is_claude_compatible_kimi_cli)
         .unwrap_or(false);
+    let vllm_available = std::env::var_os("SLAG_VLLM_BASE_URL").is_some()
+        || std::env::var_os("OPENAI_BASE_URL").is_some();
     choose_detected_smith_chain_with_policy(
         |cmd| resolve_command_path(cmd).is_some(),
         kimi_native,
         kimi_claude_compat,
         avoid_claude_autodetect_when_api_key_present(),
+        vllm_available,
     )
 }
 
@@ -265,7 +273,7 @@ fn choose_detected_smith<F>(
 where
     F: FnMut(&str) -> bool,
 {
-    choose_detected_smith_chain_with_policy(has_cmd, kimi_native, kimi_claude_compat, false)
+    choose_detected_smith_chain_with_policy(has_cmd, kimi_native, kimi_claude_compat, false, false)
         .into_iter()
         .next()
 }
@@ -278,7 +286,7 @@ fn choose_detected_smith_chain<F>(
 where
     F: FnMut(&str) -> bool,
 {
-    choose_detected_smith_chain_with_policy(has_cmd, kimi_native, kimi_claude_compat, false)
+    choose_detected_smith_chain_with_policy(has_cmd, kimi_native, kimi_claude_compat, false, false)
 }
 
 fn choose_detected_smith_chain_with_policy<F>(
@@ -286,6 +294,7 @@ fn choose_detected_smith_chain_with_policy<F>(
     kimi_native: bool,
     kimi_claude_compat: bool,
     avoid_claude_autodetect: bool,
+    vllm_available: bool,
 ) -> Vec<String>
 where
     F: FnMut(&str) -> bool,
@@ -318,6 +327,12 @@ where
     }
     if has_claude && chain.is_empty() {
         chain.push(CLAUDE_SMITH_DEFAULT.to_string());
+    }
+    // Check for SLAG_VLLM_BASE_URL — add "vllm" to the chain if set.
+    // vLLM is appended after all subprocess smiths so it acts as a fallback
+    // in auto-detection, not as the primary smith.
+    if vllm_available {
+        chain.push("vllm".to_string());
     }
     dedup_preserve_order(chain)
 }
@@ -401,6 +416,7 @@ fn resolve_smith_alias(token: &str, kimi_native: bool, kimi_claude_compat: bool)
         "codex" => Some(CODEX_WRAPPER.to_string()),
         "gemini" => Some(GEMINI_WRAPPER.to_string()),
         "opencode" => Some(OPENCODE_WRAPPER.to_string()),
+        "vllm" | "qwen" | "qwen3" => Some("vllm".to_string()),
         _ => None,
     }
 }
@@ -435,6 +451,9 @@ fn route_smith_command(base: &str, skill: &str, grade: u8, effort: Option<&str>)
 
 fn supports_claude_routing_flags(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
+    if lower.starts_with("vllm") {
+        return false;
+    }
     if lower.contains("codex ") || lower.contains("gemini ") || lower.contains("opencode ") {
         return false;
     }
@@ -542,6 +561,100 @@ fn parse_confidence(name: &str, default: f32) -> f32 {
 /// Resolve a project-relative path
 pub fn project_path(filename: &str) -> PathBuf {
     PathBuf::from(filename)
+}
+
+/// Controls when prompts are repeated to improve instruction following.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptRepeatMode {
+    Off,
+    NonPlan,
+    Always,
+}
+
+impl PromptRepeatMode {
+    pub fn from_env() -> Self {
+        match std::env::var("SLAG_PROMPT_REPEAT_MODE")
+            .unwrap_or_else(|_| "non-plan".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "off" | "never" | "0" => Self::Off,
+            "always" | "all" | "on" => Self::Always,
+            _ => Self::NonPlan,
+        }
+    }
+}
+
+/// Strategy for recasting (rewriting/splitting) cracked ingots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecastStrategy {
+    Conservative,
+    Aggressive,
+}
+
+/// Capability profile for a smith backend.
+pub struct SmithCapabilities {
+    pub name: &'static str,
+    pub context_window: usize,
+    pub supports_thinking_toggle: bool,
+    pub supports_structured_outputs: bool,
+    pub recast_strategy: RecastStrategy,
+    pub few_shot_examples: bool,
+    pub prompt_repeat_mode: PromptRepeatMode,
+    pub default_temperature: f32,
+    pub default_top_p: f32,
+    pub default_top_k: u32,
+}
+
+impl SmithCapabilities {
+    /// Conservative profile used as the trait default for unknown smiths.
+    pub fn conservative() -> Self {
+        Self {
+            name: "unknown",
+            context_window: 200_000,
+            supports_thinking_toggle: false,
+            supports_structured_outputs: false,
+            recast_strategy: RecastStrategy::Conservative,
+            few_shot_examples: false,
+            prompt_repeat_mode: PromptRepeatMode::NonPlan,
+            default_temperature: 1.0,
+            default_top_p: 1.0,
+            default_top_k: 0,
+        }
+    }
+
+    /// Profile for Claude subprocess smiths.
+    pub fn claude() -> Self {
+        Self {
+            name: "claude",
+            context_window: 200_000,
+            supports_thinking_toggle: false,
+            supports_structured_outputs: false,
+            recast_strategy: RecastStrategy::Conservative,
+            few_shot_examples: false,
+            prompt_repeat_mode: PromptRepeatMode::NonPlan,
+            default_temperature: 1.0,
+            default_top_p: 1.0,
+            default_top_k: 0,
+        }
+    }
+
+    /// Profile for vLLM/Qwen smiths.
+    pub fn vllm() -> Self {
+        Self {
+            name: "vllm",
+            context_window: 32_768,
+            supports_thinking_toggle: true,
+            supports_structured_outputs: true,
+            recast_strategy: RecastStrategy::Aggressive,
+            few_shot_examples: true,
+            prompt_repeat_mode: PromptRepeatMode::Always,
+            default_temperature: 0.7,
+            default_top_p: 0.8,
+            default_top_k: 20,
+        }
+    }
 }
 
 /// Pipeline execution configuration (from CLI flags)
@@ -698,6 +811,7 @@ mod tests {
             false,
             false,
             true,
+            false,
         );
         assert_eq!(
             chain,
@@ -708,7 +822,7 @@ mod tests {
     #[test]
     fn detected_smith_autodetect_keeps_claude_when_only_option() {
         let chain =
-            choose_detected_smith_chain_with_policy(|cmd| cmd == "claude", false, false, true);
+            choose_detected_smith_chain_with_policy(|cmd| cmd == "claude", false, false, true, false);
         assert_eq!(chain, vec![CLAUDE_SMITH_DEFAULT.to_string()]);
     }
 
@@ -830,6 +944,62 @@ mod tests {
         assert_eq!(LogFormat::parse("text"), Some(LogFormat::Text));
         assert_eq!(LogFormat::parse("json"), Some(LogFormat::Json));
         assert_eq!(LogFormat::parse("invalid"), None);
+    }
+
+    #[test]
+    fn smith_capabilities_claude_profile() {
+        let caps = SmithCapabilities::claude();
+        assert_eq!(caps.name, "claude");
+        assert!(!caps.supports_structured_outputs);
+        assert_eq!(caps.prompt_repeat_mode, PromptRepeatMode::NonPlan);
+        assert_eq!(caps.recast_strategy, RecastStrategy::Conservative);
+    }
+
+    #[test]
+    fn smith_capabilities_vllm_profile() {
+        let caps = SmithCapabilities::vllm();
+        assert_eq!(caps.name, "vllm");
+        assert!(caps.supports_structured_outputs);
+        assert_eq!(caps.prompt_repeat_mode, PromptRepeatMode::Always);
+        assert_eq!(caps.recast_strategy, RecastStrategy::Aggressive);
+    }
+
+    #[test]
+    fn smith_capabilities_conservative_profile() {
+        let caps = SmithCapabilities::conservative();
+        assert_eq!(caps.name, "unknown");
+        assert_eq!(caps.prompt_repeat_mode, PromptRepeatMode::NonPlan);
+        assert_eq!(caps.recast_strategy, RecastStrategy::Conservative);
+    }
+
+    fn parse_repeat_mode(s: &str) -> PromptRepeatMode {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "off" | "never" | "0" => PromptRepeatMode::Off,
+            "always" | "all" | "on" => PromptRepeatMode::Always,
+            _ => PromptRepeatMode::NonPlan,
+        }
+    }
+
+    #[test]
+    fn prompt_repeat_mode_parses_default_value() {
+        // The default env string "non-plan" falls through to NonPlan
+        assert_eq!(parse_repeat_mode("non-plan"), PromptRepeatMode::NonPlan);
+        assert_eq!(parse_repeat_mode("unknown-value"), PromptRepeatMode::NonPlan);
+        assert_eq!(parse_repeat_mode(""), PromptRepeatMode::NonPlan);
+    }
+
+    #[test]
+    fn prompt_repeat_mode_parses_off() {
+        assert_eq!(parse_repeat_mode("off"), PromptRepeatMode::Off);
+        assert_eq!(parse_repeat_mode("never"), PromptRepeatMode::Off);
+        assert_eq!(parse_repeat_mode("0"), PromptRepeatMode::Off);
+    }
+
+    #[test]
+    fn prompt_repeat_mode_parses_always() {
+        assert_eq!(parse_repeat_mode("always"), PromptRepeatMode::Always);
+        assert_eq!(parse_repeat_mode("all"), PromptRepeatMode::Always);
+        assert_eq!(parse_repeat_mode("on"), PromptRepeatMode::Always);
     }
 }
 
