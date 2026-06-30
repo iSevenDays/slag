@@ -13,7 +13,6 @@ use crate::config::{PipelineConfig, SmithConfig};
 use crate::crucible::Crucible;
 use crate::error::SlagError;
 use crate::events;
-use crate::smith::claude::ClaudeSmith;
 use crate::tui;
 
 /// Run the full pipeline (4 or 5 phases depending on review mode).
@@ -50,8 +49,8 @@ pub async fn run(
             );
             existing
         } else {
-            let smith = ClaudeSmith::new(smith_config.base.clone());
-            quarrier::run(&smith, pipeline_config.verbose).await?
+            let smith = crate::smith::build_smith(&smith_config.base)?;
+            quarrier::run(&*smith, pipeline_config.verbose).await?
         }
     } else {
         quarrier::Phase::single_phase()
@@ -79,14 +78,14 @@ pub async fn run(
                 let ore_path = std::path::Path::new(crate::config::ORE_FILE);
                 let original_ore = std::fs::read_to_string(ore_path).unwrap_or_default();
                 std::fs::write(ore_path, &scoped_ore)?;
-                let smith = ClaudeSmith::new(smith_config.surveyor.clone());
-                let result = surveyor::run(&smith, pipeline_config.verbose).await;
+                let smith = crate::smith::build_smith(&smith_config.surveyor)?;
+                let result = surveyor::run(&*smith, pipeline_config.verbose).await;
                 // Restore original ore
                 std::fs::write(ore_path, original_ore)?;
                 result?;
             } else {
-                let smith = ClaudeSmith::new(smith_config.surveyor.clone());
-                surveyor::run(&smith, pipeline_config.verbose).await?;
+                let smith = crate::smith::build_smith(&smith_config.surveyor)?;
+                surveyor::run(&*smith, pipeline_config.verbose).await?;
             }
         }
 
@@ -97,9 +96,9 @@ pub async fn run(
             !content.contains("(ingot ")
         };
         if needs_founder {
-            let smith = ClaudeSmith::new(smith_config.founder.clone());
+            let smith = crate::smith::build_smith(&smith_config.founder)?;
             founder::run(
-                &smith,
+                &*smith,
                 pipeline_config.verbose,
                 smith_config.founder_confidence_threshold,
             )
@@ -287,8 +286,8 @@ async fn run_forge_loop(
 
         // Phase 3.5: Review (if worktree mode enabled)
         if pipeline_config.should_review() && !forged_branches.is_empty() {
-            let smith = ClaudeSmith::new(smith_config.review.clone());
-            review::run(&smith, pipeline_config, &forged_branches).await?;
+            let smith = crate::smith::build_smith(&smith_config.review)?;
+            review::run(&*smith, pipeline_config, &forged_branches).await?;
         } else if pipeline_config.worktree
             && pipeline_config.skip_review
             && !forged_branches.is_empty()
@@ -324,9 +323,9 @@ async fn run_forge_loop(
 
         if counts.cracked == 0 {
             if pipeline_config.outcome_gate {
-                let validator = ClaudeSmith::new(smith_config.outcome.clone());
+                let validator = crate::smith::build_smith(&smith_config.outcome)?;
                 let outcome_passed = outcome::validate_and_queue(
-                    &validator,
+                    &*validator,
                     cycle,
                     pipeline_config.verbose,
                     smith_config.outcome_confidence_threshold,
@@ -379,9 +378,9 @@ async fn run_forge_loop(
         }
 
         // Analyze failures and prepare for retry
-        let smith = ClaudeSmith::new(smith_config.recovery.clone());
+        let smith = crate::smith::build_smith(&smith_config.recovery)?;
         let can_retry =
-            analysis::analyze_and_prepare(&smith, smith_config, pipeline_config, cycle).await?;
+            analysis::analyze_and_prepare(&*smith, smith_config, pipeline_config, cycle).await?;
 
         if !can_retry {
             println!("\n  \x1b[31m✗\x1b[0m No recoverable ingots, stopping");

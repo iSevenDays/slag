@@ -13,6 +13,18 @@ use crate::error::SlagError;
 #[allow(unused_imports)]
 pub use crate::events::{FailureClass, RecastFailure};
 
+/// Dispatch a smith command string to the right adapter.
+/// `"vllm"` (and any token starting with `"vllm "`) constructs `VllmSmith::from_env()`,
+/// everything else is treated as a subprocess invocation handled by `ClaudeSmith`.
+pub fn build_smith(cmd: &str) -> Result<Box<dyn Smith>, SlagError> {
+    let trimmed = cmd.trim();
+    if trimmed == "vllm" || trimmed.starts_with("vllm ") {
+        let smith = vllm::VllmSmith::from_env()?;
+        return Ok(Box::new(smith));
+    }
+    Ok(Box::new(claude::ClaudeSmith::new(cmd.to_string())))
+}
+
 /// Structured output constraint for capable smiths (e.g., vLLM with xgrammar).
 /// Passed to `invoke_with_constraints`; ignored by smiths that don't support it.
 #[derive(Debug, Clone)]
@@ -136,6 +148,39 @@ mod tests {
         let smith_b = MockSmith::new(vec![]);
         // Both should point to the same static allocation
         assert!(std::ptr::eq(smith_a.capabilities(), smith_b.capabilities()));
+    }
+
+    #[test]
+    fn build_smith_dispatches_vllm_token_to_vllm_adapter() {
+        std::env::set_var("SLAG_VLLM_BASE_URL", "http://localhost:8000");
+        std::env::set_var("SLAG_VLLM_MODEL", "qwen3-32b");
+        let smith = build_smith("vllm").expect("vllm token should build VllmSmith");
+        assert_eq!(
+            smith.capabilities().name,
+            "vllm",
+            "expected vllm capability profile, not subprocess fallback"
+        );
+        std::env::remove_var("SLAG_VLLM_BASE_URL");
+        std::env::remove_var("SLAG_VLLM_MODEL");
+    }
+
+    #[test]
+    fn build_smith_defaults_to_claude_subprocess_for_arbitrary_commands() {
+        let smith =
+            build_smith("claude -p --permission-mode bypassPermissions").expect("should build");
+        assert_eq!(smith.capabilities().name, "claude");
+    }
+
+    #[test]
+    fn build_smith_dispatches_vllm_with_trailing_args_to_vllm_adapter() {
+        // "vllm" followed by future flags should still route to the HTTP adapter,
+        // not be spawned as a subprocess.
+        std::env::set_var("SLAG_VLLM_BASE_URL", "http://localhost:8000");
+        std::env::set_var("SLAG_VLLM_MODEL", "qwen3-32b");
+        let smith = build_smith("vllm --some-future-flag").expect("vllm prefix should build");
+        assert_eq!(smith.capabilities().name, "vllm");
+        std::env::remove_var("SLAG_VLLM_BASE_URL");
+        std::env::remove_var("SLAG_VLLM_MODEL");
     }
 
     #[test]
